@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewModels="clr-namespace:NumberArtist.View.ViewModels"
+             x:Class="NumberArtist.View.Views.LoginPage"
+             Title="Login">
+    <ContentPage.BindingContext>
+        <viewModels:LoginViewModel />
+    </ContentPage.BindingContext>
+    <VerticalStackLayout Spacing="10" Padding="20" VerticalOptions="Center">
+        <Label Text="Welcome" FontSize="Header" HorizontalOptions="Center" />
+        <Entry Placeholder="Username" Text="{Binding Username}" />
+        <Entry Placeholder="Password" IsPassword="True" Text="{Binding Password}" />
+        <Button Text="Login" Command="{Binding LoginCommand}" HorizontalOptions="Center" />
+    </VerticalStackLayout>
+</ContentPage>

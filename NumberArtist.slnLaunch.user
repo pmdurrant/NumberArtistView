@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "Start Maui and Api",
+    "Projects": [
+      {
+        "Path": "..\\NumberArtistView\\NumberArtistView\\NumberArtistView.csproj",
+        "Action": "Start",
+        "DebugTarget": "Windows Machine"
+      },
+      {
+        "Path": "..\\NumberArtistView\\NumberArtist.Api\\NumberArtist.Api.csproj",
+        "Action": "Start",
+        "DebugTarget": "https"
+      }
+    ]
+  }
+]

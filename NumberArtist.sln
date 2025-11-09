@@ -1,0 +1,59 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.3.32929.385
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "netDxf", "..\netDxf\netDxf\netDxf.csproj", "{AB0B1738-826F-41BF-ACD0-92BB9421B48B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{086E9AC0-28DC-4CBB-AA45-0EE73BF3B236}"
+	ProjectSection(SolutionItems) = preProject
+		..\netDxf\.gitignore = ..\netDxf\.gitignore
+		..\netDxf\README.md = ..\netDxf\README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{6B14C525-BD93-4013-9601-C63F8EE0D20C}"
+	ProjectSection(SolutionItems) = preProject
+		..\netDxf\doc\Changelog.txt = ..\netDxf\doc\Changelog.txt
+		..\netDxf\LICENSE = ..\netDxf\LICENSE
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NumberArtistView", "NumberArtistView\NumberArtistView.csproj", "{640C8736-E7EF-4F16-BB09-0EBCD2A107FB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NumberArtist.Api", "NumberArtist.Api\NumberArtist.Api.csproj", "{3D46508F-C445-4762-96C3-D94D25810B15}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Core.Business.Objects", "Core.Business.Objects\Core.Business.Objects.csproj", "{7E0423BF-A3AA-4C86-8351-AFB832965117}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{AB0B1738-826F-41BF-ACD0-92BB9421B48B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB0B1738-826F-41BF-ACD0-92BB9421B48B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB0B1738-826F-41BF-ACD0-92BB9421B48B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB0B1738-826F-41BF-ACD0-92BB9421B48B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{640C8736-E7EF-4F16-BB09-0EBCD2A107FB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{640C8736-E7EF-4F16-BB09-0EBCD2A107FB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{640C8736-E7EF-4F16-BB09-0EBCD2A107FB}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{640C8736-E7EF-4F16-BB09-0EBCD2A107FB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{640C8736-E7EF-4F16-BB09-0EBCD2A107FB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D46508F-C445-4762-96C3-D94D25810B15}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D46508F-C445-4762-96C3-D94D25810B15}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D46508F-C445-4762-96C3-D94D25810B15}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D46508F-C445-4762-96C3-D94D25810B15}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E0423BF-A3AA-4C86-8351-AFB832965117}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E0423BF-A3AA-4C86-8351-AFB832965117}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E0423BF-A3AA-4C86-8351-AFB832965117}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E0423BF-A3AA-4C86-8351-AFB832965117}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6B14C525-BD93-4013-9601-C63F8EE0D20C} = {086E9AC0-28DC-4CBB-AA45-0EE73BF3B236}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5CB6F54A-A869-479F-9B47-FA535B56585E}
+	EndGlobalSection
+EndGlobal

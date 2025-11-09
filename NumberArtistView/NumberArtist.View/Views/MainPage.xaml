@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="NumberArtistView.MainPage"
+             xmlns:drawable="clr-namespace:NumberArtistView"
+             Title="Number Artist">
+    <Grid RowDefinitions="Auto, Auto, *, Auto" ColumnDefinitions="*, Auto">
+
+        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0"
+                SelectedIndexChanged="DxfFilePicker_SelectedIndexChanged"/>
+
+        <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="1" />
+
+        <ListView x:Name="LayersListView" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" />
+
+        <GraphicsView x:Name="GraphicsView" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" />
+
+        <ProgressBar x:Name="LoadingProgressBar" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
+
+        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" HorizontalOptions="FillAndExpand"/>
+
+    </Grid>
+</ContentPage>
+
