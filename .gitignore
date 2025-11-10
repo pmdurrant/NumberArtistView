@@ -1,0 +1,10 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/Core.Business.Objects/obj
+/NumberArtist.Api/bin/Debug/net9.0
+/NumberArtist.Api/obj
+/NumberArtistView/bin/Debug
+/NumberArtistView/obj
