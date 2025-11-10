@@ -100,9 +100,11 @@ namespace NumberArtist.Api.Controllers
                 // but it's good practice to handle it.
                 return Unauthorized("Could not determine user identity.");
             }
-            //todo get user id from token
-            var userId = userToken?.UserId; 
-
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserName == userName);
+            if (user == null)
+            {
+                return BadRequest("The user associated with this action does not exist.");
+            }
 
 
             var userFolderPath = Path.Combine(_filesPath, userName);
@@ -128,7 +130,7 @@ namespace NumberArtist.Api.Controllers
                 StoredFileName = storedFileName,
                 ContentType = file.ContentType,
                 UploadedAt = DateTime.UtcNow,
-                AppUserId = userId
+                AppUserId = user.Id
             };
 
             _context.DxfFiles.Add(dxfFile);

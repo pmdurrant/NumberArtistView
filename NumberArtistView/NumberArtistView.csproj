@@ -77,8 +77,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\..\netDxf\netDxf\netDxf.csproj" />
 	  <ProjectReference Include="..\Core.Business.Objects\Core.Business.Objects.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Reference Include="netDxf">
+	    <HintPath>..\..\netDxf-master\netDxf\bin\Debug\net9.0\netDxf.dll</HintPath>
+	  </Reference>
 	</ItemGroup>
 
 	<ItemGroup>

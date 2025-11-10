@@ -1,0 +1,6 @@
+@NumberArtist.Api_HostAddress = http://numberartist,officeblox.co.uk:5016
+
+GET {{NumberArtist.Api_HostAddress}}/DxfFiles/
+Accept: application/json
+
+###
