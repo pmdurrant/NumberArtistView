@@ -24,7 +24,7 @@
 		<ApplicationTitle>NumberArtistView</ApplicationTitle>
 
 		<!-- App Identifier -->
-		<ApplicationId>com.companyname.numberartistview</ApplicationId>
+		<ApplicationId>com.officeblox.numberartistview</ApplicationId>
 
 		<!-- Versions -->
 		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
@@ -60,15 +60,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <EmbeddedResource Include="Resources\dxf_files\bb41e279-7023-47e3-9bba-6df189b10fb8_haloween3.dxf">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </EmbeddedResource>
-	  <EmbeddedResource Include="Resources\dxf_files\halloween2.dxf">
-	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	  </EmbeddedResource>
-	</ItemGroup>
-
-	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="9.0.120" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.10" />
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
@@ -90,6 +81,10 @@
 	  <MauiXaml Update="NumberArtist.View\Views\MainPage.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Resources\dxf_files\" />
 	</ItemGroup>
 
 </Project>

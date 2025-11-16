@@ -2,11 +2,12 @@ using Core.Business.Objects;
 using netDxf;
 using Newtonsoft.Json;
 using NumberArtist.View.Views;
+using NumberArtistView.Models;
 using NumberArtistView.Services;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Text;
-
+using netDxf;
 
 namespace NumberArtistView
 {
@@ -30,7 +31,7 @@ namespace NumberArtistView
 
 
             polylineDrawable = new PolylineDrawable();
-            this.GraphicsView.Drawable = polylineDrawable; // Use the GraphicsView from XAML
+            this.GraphicsView.Drawable = (IDrawable)polylineDrawable; // Use the GraphicsView from XAML
 
             // The ListView in XAML is named LayersListView, let's bind its selection changed event
             LayersListView.ItemSelected += LayerPicker_ItemSelected;
@@ -116,6 +117,7 @@ namespace NumberArtistView
                     {
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
+                        LayerColour = new LayerColorObject() { R = 255, G = 0, B = 0 }, // You might want to set actual color values here
                         Vertices = pline.Vertexes.Select(v => new VertexModel
                         {
                             X = v.Position.X,
@@ -130,7 +132,7 @@ namespace NumberArtistView
 
                     if (layers.Any())
                     {
-                        LayersListView.SelectedItem = layers.First();
+                        LayersListView.SelectedItem = layers[0];
                     }
                     else
                     {
@@ -164,14 +166,6 @@ namespace NumberArtistView
                 
                 var dxfFile= await resourceaccess.GetResourceAsync(resourceName);
 
-                //  var dxfFile = await _databaseService.GetDxfFileBytesAsync(resourceName);
-
-                //if (dxfFile == null || dxfFile.FileContents == null || dxfFile.FileContents.Length == 0)
-                //{
-                //    await DisplayAlert("Error", $"Could not load DXF file '{resourceName}' from the database.", "OK");
-                //    return;
-                //}
-
                 byte[] array = Encoding.ASCII.GetBytes(dxfFile);
 
 
@@ -188,20 +182,30 @@ namespace NumberArtistView
                     {
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
+                        LayerColour = pline.Layer.Color.Index   ,
                         Vertices = pline.Vertexes.Select(v => new VertexModel
                         {
                             X = v.Position.X,
                             Y = v.Position.Y,
-                            Bulge = v.Bulge
+                            Bulge = v.Bulge,
                         }).ToList()
                     }).ToList();
-
                     var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
-                    LayersListView.ItemsSource = layers;
+                   List<LayerItem> layers2 = new List<LayerItem>();
+                    
+                    
+                    var itemsPos=1;
+                    foreach (var layer in layers)
+                    {
+
+                        layers2.Add(new LayerItem() { LayerColour = new LayerColorObject() { R = 255, G = 0, B = 0 }, LayerIndex = itemsPos , LayerName= itemsPos.ToString() });
+                   itemsPos++;
+                    }
+                    LayersListView.ItemsSource = layers2;
 
                     if (layers.Any())
                     {
-                        LayersListView.SelectedItem = layers.First();
+                        LayersListView.SelectedItem = layers[0];
                     }
                     else
                     {
@@ -209,6 +213,7 @@ namespace NumberArtistView
                     }
 
                     GraphicsView.Invalidate();
+                 
                 }
             }
             catch (Exception ex)
@@ -217,6 +222,10 @@ namespace NumberArtistView
             }
         }
 
+        private void ColorBox_Tapped(object sender, TappedEventArgs e)
+        {
+            // Event handling logic goes here
+        }
 
         private void DxfFilePicker_SelectedIndexChanged(object sender, EventArgs e)
         {
@@ -230,9 +239,14 @@ namespace NumberArtistView
 
         private void LayerPicker_ItemSelected(object? sender, SelectedItemChangedEventArgs e)
         {
-            if (e.SelectedItem is string selectedLayer)
+            if (e.SelectedItem is LayerItem selectedLayer)
             {
-                polylineDrawable.SelectedLayer = selectedLayer;
+                polylineDrawable.SelectedLayer = selectedLayer.LayerName;
+                GraphicsView.Invalidate(); // Redraw the view
+            }
+            else if (e.SelectedItem is string selectedLayerName) // Fallback for old behavior
+            {
+                polylineDrawable.SelectedLayer = selectedLayerName;
                 GraphicsView.Invalidate(); // Redraw the view
             }
         }
@@ -281,6 +295,22 @@ namespace NumberArtistView
             {
                 await DisplayAlert("Error", $"An error occurred while selecting the DXF file: {ex.Message}", "OK");
             }
+        }
+
+        private void SwipeGestureRecognizer_Swiped(object sender, SwipedEventArgs e)
+        {
+
+            Color chColor = null;
+            
+            
+            var box = (BoxView)sender;
+               
+                switch (e.Direction)
+            { case SwipeDirection.Right:
+                    chColor = Colors.Red;
+                    break;
+            }
+
         }
     }
 }

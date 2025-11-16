@@ -4,21 +4,47 @@
              x:Class="NumberArtistView.MainPage"
              xmlns:drawable="clr-namespace:NumberArtistView"
              Title="Number Artist">
-    <Grid RowDefinitions="Auto, Auto, *, Auto" ColumnDefinitions="*, Auto">
+    <Grid RowDefinitions="Auto, *, Auto" ColumnDefinitions="*, Auto, 250">
 
-        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0"
+        <!-- Row 0: File Selection -->
+        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
                 SelectedIndexChanged="DxfFilePicker_SelectedIndexChanged"/>
 
-        <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="1" />
+        <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="2" />
 
-        <ListView x:Name="LayersListView" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" />
+        <!-- Row 1: Main Content -->
+        <GraphicsView x:Name="GraphicsView" Grid.Row="1" Grid.Column="0" />
 
-        <GraphicsView x:Name="GraphicsView" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" />
+        <ProgressBar x:Name="LoadingProgressBar" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
 
-        <ProgressBar x:Name="LoadingProgressBar" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
+        <!-- Replace GridSplitter with a simple BoxView as a visual separator -->
+        <BoxView Grid.Row="1" Grid.Column="1" WidthRequest="5" HorizontalOptions="Center" VerticalOptions="Fill" Color="Gray" />
 
-        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" HorizontalOptions="FillAndExpand"/>
+        <ListView x:Name="LayersListView" Grid.Row="1" Grid.Column="2">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <ViewCell>
+                        <Grid Padding="5" ColumnDefinitions="*,Auto">
+                            <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="0" />
+                            <!-- Replace ColorPicker with BoxView to show color -->
+                            <BoxView Color="{Binding LayerColor}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="1" >
+                                <BoxView.GestureRecognizers>
+                                    <SwipeGestureRecognizer Direction="Right"  Swiped="SwipeGestureRecognizer_Swiped">
+                                        
+                                    </SwipeGestureRecognizer>
+                                </BoxView.GestureRecognizers>
+                            </BoxView>
+                        </Grid>
+                    </ViewCell>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <!-- Row 2: Logout -->
+        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" HorizontalOptions="FillAndExpand"/>
 
     </Grid>
 </ContentPage>
+
+
 

@@ -10,7 +10,8 @@
         "dependencies": {
           "Magick.NET.Core": "14.9.1",
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "9.0.10",
-          "sqlite-net-pcl": "1.9.172"
+          "sqlite-net-pcl": "1.9.172",
+          "netDxf": "3.0.1.0"
         },
         "runtime": {
           "Core.Business.Objects.dll": {}
@@ -377,7 +378,15 @@
           }
         }
       },
-      "System.Memory/4.5.3": {}
+      "System.Memory/4.5.3": {},
+      "netDxf/3.0.1.0": {
+        "runtime": {
+          "netDxf.dll": {
+            "assemblyVersion": "3.0.1.0",
+            "fileVersion": "3.0.1.0"
+          }
+        }
+      }
     }
   },
   "libraries": {
@@ -560,6 +569,11 @@
       "sha512": "sha512-3oDzvc/zzetpTKWMShs1AADwZjQ/36HnsufHRPcOjyRAAMLDlu2iD33MBI2opxnezcVUtXyqDXXjoFMOU9c7SA==",
       "path": "system.memory/4.5.3",
       "hashPath": "system.memory.4.5.3.nupkg.sha512"
+    },
+    "netDxf/3.0.1.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
     }
   }
 }
