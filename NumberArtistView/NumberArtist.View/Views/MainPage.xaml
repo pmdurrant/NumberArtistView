@@ -19,10 +19,6 @@
                 <PanGestureRecognizer PanUpdated="PanGestureRecognizer_PanUpdated" />
             </GraphicsView.GestureRecognizers>
         </GraphicsView>
-        
-        
-        
-        
 
         <ProgressBar x:Name="LoadingProgressBar" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
 
@@ -33,13 +29,16 @@
             <ListView.ItemTemplate>
                 <DataTemplate>
                     <ViewCell>
-                        <Grid Padding="5" ColumnDefinitions="*,Auto">
-                            <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="0" />
+                        <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
+                            <!-- New checkbox bound to IsVisible -->
+                            <CheckBox IsChecked="{Binding IsVisible}" VerticalOptions="Center" Grid.Column="0" />
+
+                            <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
+
                             <!-- Replace ColorPicker with BoxView to show color -->
-                            <BoxView Color="{Binding color}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="1" >
+                            <BoxView Color="{Binding color}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="2" >
                                 <BoxView.GestureRecognizers>
                                     <SwipeGestureRecognizer Direction="Right"  Swiped="SwipeGestureRecognizer_Swiped">
-                                        
                                     </SwipeGestureRecognizer>
                                 </BoxView.GestureRecognizers>
                             </BoxView>
@@ -54,6 +53,10 @@
 
     </Grid>
 </ContentPage>
+
+
+
+
 
 
 

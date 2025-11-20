@@ -5,6 +5,7 @@ using Newtonsoft.Json;
 using NumberArtist.View.Views;
 using NumberArtistView.Models;
 using NumberArtistView.Services;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Reflection;
@@ -89,7 +90,7 @@ namespace NumberArtistView
         }
 
         // Extracted method to address S1199
-        private async Task ProcessDxfFileEntryAsync(DxfFileEntry   dxfFileEntry)
+        private async Task ProcessDxfFileEntryAsync(DxfFileEntry dxfFileEntry)
         {
             var _bytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(dxfFileEntry));
             if (_bytes == null || _bytes.Length == 0)
@@ -132,19 +133,33 @@ namespace NumberArtistView
                         }).ToList()
                     }).ToList();
 
-                    // Update the ItemsSource for the ListView defined in XAML
                     var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
-                    LayersListView.ItemsSource = layers;
-
-                    if (layers.Any())
+                    var layers2 = layers.Select((ln, idx) => new LayerItem
                     {
-                        LayersListView.SelectedItem = layers[0];
+                        LayerName = ln,
+                        LayerIndex = idx + 1,
+                        color = Microsoft.Maui.Graphics.Colors.Black,
+                        IsVisible = true
+                    }).ToList();
+
+                    foreach (var li in layers2)
+                        li.PropertyChanged += LayerItem_PropertyChanged;
+
+                    LayersListView.ItemsSource = layers2;
+
+                    if (layers2.Any())
+                    {
+                        LayersListView.SelectedItem = layers2[0];
                     }
                     else
                     {
                         polylineDrawable.SelectedLayer = null;
-                        GraphicsView.Invalidate();
                     }
+
+                    // initialize drawable visible layers from list
+                    polylineDrawable.VisibleLayers = layers2.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+
+                    GraphicsView.Invalidate();
                 }
             }
             catch (Exception ex)
@@ -182,8 +197,6 @@ namespace NumberArtistView
 
                     polylineDrawable.Polylines = loaded.Entities.Polylines2D.Select(pline => new Pline2DModel
                     {
-                       
-
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
                         LayerColour = GetColour( pline.Layer.Color.Index),
@@ -224,20 +237,30 @@ namespace NumberArtistView
                         {
                             color = Color.FromRgb(layerColourObj.R,layerColourObj.G,layerColourObj.B),
                             LayerIndex = i + 1,
-                            LayerName = layerName
+                            LayerName = layerName,
+                            IsVisible = true
                         });
+                    }
+
+                    // Wire up property changed so toggling boxes updates drawable and view
+                    foreach (var li in layers2)
+                    {
+                        li.PropertyChanged += LayerItem_PropertyChanged;
                     }
 
                     LayersListView.ItemsSource = layers2;
 
-                    if (layers.Any())
+                    if (layers2.Any())
                     {
-                        LayersListView.SelectedItem = layers[0];
+                        LayersListView.SelectedItem = layers2[0];
                     }
                     else
                     {
                         polylineDrawable.SelectedLayer = null;
                     }
+
+                    // initialize drawable visible layers from list
+                    polylineDrawable.VisibleLayers = layers2.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
 
                     GraphicsView.Invalidate();
                 }
@@ -422,6 +445,20 @@ namespace NumberArtistView
         private void PanGestureRecognizer_PanUpdated(object sender, PanUpdatedEventArgs e)
         {
 
+        }
+
+        // common handler that updates drawable visible set when a layer's IsVisible changes
+        private void LayerItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(LayerItem.IsVisible))
+            {
+                var items = LayersListView.ItemsSource as IEnumerable<LayerItem>;
+                if (items != null)
+                {
+                    polylineDrawable.VisibleLayers = items.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+                    GraphicsView.Invalidate();
+                }
+            }
         }
     }
 }
