@@ -1,12 +1,12 @@
 using Core.Business.Objects;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Bson;
+using NumberArtistView.Services.Models;
 using SQLite;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-
 
 namespace NumberArtistView.Services
 {
@@ -18,29 +18,19 @@ namespace NumberArtistView.Services
         {
             var dbPath = Path.Combine(FileSystem.AppDataDirectory, "NumberArtist.db3");
 
-            if (!File.Exists(dbPath))
-            {
-                _database = new SQLiteAsyncConnection(dbPath);
-                _database.CreateTableAsync<Core.Business.Objects.DxfFileEntry>().Wait();
-            }
-            else
-            { 
-                _database = new SQLiteAsyncConnection(dbPath);
-            }
-            //_database.DropTableAsync<DxfFileEntry>().Wait();
-            //_database.CreateTableAsync<Core.Business.Objects.DxfFileEntry>().Wait();
+            _database = new SQLiteAsyncConnection(dbPath);
+            _database.CreateTableAsync<Core.Business.Objects.DxfFileEntry>().Wait();
+
+            // Ensure a unique index to avoid duplicate resource entries per user.
+            // This enforces uniqueness at the DB level and prevents race/duplicate insert issues.
+            _database.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS idx_dxffile_res_user ON DxfFileEntry(ResourceName, AppUserId);").Wait();
         }
 
         public async Task InitializeAsync()
         {
-
-
-
-
-            CopyFilesFromServerToLocalDb().Wait();
-
+            // Use await instead of .Wait()
+            await CopyFilesFromServerToLocalDb();
         }
-
 
         public async Task CopyFilesFromServerToLocalDb()
         {
@@ -52,78 +42,68 @@ namespace NumberArtistView.Services
             {
                 httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             }
-            
+
             Guid userId = Guid.Parse(await SecureStorage.GetAsync("userId"));
-            
+
             var response = await httpClient.GetAsync("api/dxffiles");
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                // This 'entities' list contains DxfFile objects from the server
-               // var entities = JsonConvert.DeserializeObject<List<DxfFileEntry>>(json);
                 var entities = JsonConvert.DeserializeObject<List<Root>>(json);
-                
+
                 foreach (var fileFromServer in entities)
                 {
                     try
                     {
-                        // Query the DxfFileEntry table, not DxfFile
-                        var existingFile = await _database.Table<DxfFileEntry>()
-                            // Check if a file with the same name and user ID already exists
-                            .Where(f => f.Name == fileFromServer.fileName && f.AppUserId == userId)
-                            .FirstOrDefaultAsync(); 
+                            // Normalize the resource name (stable unique identifier)
+                        var resourceName = fileFromServer.storedFileName?.Trim();
 
-                        // If no matching file is found in the local DB, insert it.
+                        // Check existence by ResourceName + AppUserId (stable key)
+                        var existingFile = await _database.Table<DxfFileEntry>()
+                            .Where(f => f.ResourceName == resourceName && f.AppUserId == userId)
+                            .FirstOrDefaultAsync();
+
                         if (existingFile == null)
                         {
-                            // Map the server object (DxfFile) to a database entity (DxfFileEntry)
                             var newFileEntry = new DxfFileEntry
                             {
-                               
-                                Name = fileFromServer.fileName,
-                                ResourceName = fileFromServer.storedFileName, // Or whatever property holds the resource name
-                                AppUserId = userId 
+                                Name = fileFromServer.fileName?.Trim(),
+                                ResourceName = resourceName,
+                                AppUserId = userId
                             };
-                            await _database.InsertAsync(newFileEntry);
+
+                            try
+                            {
+                                await _database.InsertAsync(newFileEntry);
+                            }
+                            catch (SQLiteException)
+                            {
+                                // If another thread/process inserted the same resource concurrently
+                                // the unique index will raise a constraint error; ignore it.
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        // It's good practice to log the exception for debugging
                         Console.WriteLine($"Error processing file: {ex.Message}");
                     }
                 }
             }
             return;
         }
-        public class Root
-        {
-            public int id { get; set; }
-            public string fileName { get; set; }
-            public string contentType { get; set; }
-            public string storedFileName { get; set; }
-            public DateTime uploadedAt { get; set; }
-            public string appUserId { get; set; }
-            public object appUser { get; set; }
-        }
 
         public Task<int> GetRecordCount()
         {
             return _database.Table<DxfFileEntry>().CountAsync();
         }
+
         public async Task<List<DxfFileEntry>> GetDxfFilesAsync(Guid userId)
         {
-
-            // var fred = await _database.Table<DxfFileEntry>().ToListAsync();
-
-            // Console.WriteLine(fred.Count);
             return await _database.Table<DxfFileEntry>().Where(f => f.AppUserId == userId).ToListAsync();
-            // return fred;
         }
 
         public async Task<DxfFileEntry?> GetDxfFileByNameAsync(string resourceName)
         {
-          //  await InitializeAsync();
             return await _database.Table<DxfFileEntry>()
                 .Where(f => f.ResourceName == resourceName)
                 .FirstOrDefaultAsync();
@@ -163,7 +143,6 @@ namespace NumberArtistView.Services
                         File.WriteAllBytes(resourceName, outentity);
                     }
 
-                    // Map Root to DxfFileEntry before returning
                     var fileEntry = new DxfFileEntry
                     {
                         Id = entity.id,
@@ -173,13 +152,9 @@ namespace NumberArtistView.Services
                     };
                     return fileEntry;
                 }
-                // Explicitly return null if entity is null
                 return null;
             }
             return null;
         }
-
-
     }
-    
 }

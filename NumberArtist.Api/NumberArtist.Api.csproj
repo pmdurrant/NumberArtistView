@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <Folder Include="https\" />
+    <Folder Include="wwwroot\" />
   </ItemGroup>
 
   <ItemGroup>

@@ -14,9 +14,7 @@ namespace NumberArtistView.Services
         // The base address of your API.
         // For Android emulator, use 10.0.2.2 to connect to localhost on the host machine.
         // For Windows, you can use https://localhost:5015
-        private readonly string _baseAddress = DeviceInfo.Platform == DevicePlatform.Android
-                                              ? "https://10.0.2.2:5015"
-                                              : "https://localhost:5015";
+        private readonly string _baseAddress = "https://numberartist.officeblox.co.uk:5015";
 
         public AuthService()
         {

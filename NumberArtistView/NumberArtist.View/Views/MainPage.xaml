@@ -13,7 +13,16 @@
         <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="2" />
 
         <!-- Row 1: Main Content -->
-        <GraphicsView x:Name="GraphicsView" Grid.Row="1" Grid.Column="0" />
+        <GraphicsView x:Name="GraphicsView" Grid.Row="1" Grid.Column="0">
+            <GraphicsView.GestureRecognizers>
+                <PinchGestureRecognizer PinchUpdated="PinchGestureRecognizer_PinchUpdated" />
+                <PanGestureRecognizer PanUpdated="PanGestureRecognizer_PanUpdated" />
+            </GraphicsView.GestureRecognizers>
+        </GraphicsView>
+        
+        
+        
+        
 
         <ProgressBar x:Name="LoadingProgressBar" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
 
@@ -27,7 +36,7 @@
                         <Grid Padding="5" ColumnDefinitions="*,Auto">
                             <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="0" />
                             <!-- Replace ColorPicker with BoxView to show color -->
-                            <BoxView Color="{Binding LayerColor}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="1" >
+                            <BoxView Color="{Binding color}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="1" >
                                 <BoxView.GestureRecognizers>
                                     <SwipeGestureRecognizer Direction="Right"  Swiped="SwipeGestureRecognizer_Swiped">
                                         
@@ -45,6 +54,8 @@
 
     </Grid>
 </ContentPage>
+
+
 
 
 

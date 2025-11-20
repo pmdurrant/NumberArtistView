@@ -30,7 +30,10 @@ namespace NumberArtistView.Models
                     .Select(v => new PointF((float)v.X, (float)v.Y))
                     .ToArray();
 
-                canvas.StrokeColor = Colors.Red;
+                var layerindex = Layers.ToList().IndexOf(SelectedLayer);
+
+                ColourSelectionList colorlist = new ColourSelectionList();
+                canvas.StrokeColor = colorlist.Selection[layerindex];
 
                 // Fix: Use PathF to draw polygon since ICanvas does not have DrawPolygon
                 if (points.Length > 1)

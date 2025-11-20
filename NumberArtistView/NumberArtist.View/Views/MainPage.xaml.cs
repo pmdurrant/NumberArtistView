@@ -1,13 +1,15 @@
 using Core.Business.Objects;
 using netDxf;
+
 using Newtonsoft.Json;
 using NumberArtist.View.Views;
 using NumberArtistView.Models;
 using NumberArtistView.Services;
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Text;
-using netDxf;
+
 
 namespace NumberArtistView
 {
@@ -48,7 +50,7 @@ namespace NumberArtistView
         {
             base.OnAppearing();
 
-            Task.Run(async () => await _databaseService.CopyFilesFromServerToLocalDb());
+         //   Task.Run(async () => await _databaseService.CopyFilesFromServerToLocalDb());
 
 
             Task.Run(async () => await LoadDxfFilesIntoPicker());
@@ -70,6 +72,7 @@ namespace NumberArtistView
 
             await _databaseService.InitializeAsync();
 
+            Debug.Write(@"here at {0}", DateTime.Now.ToString());
 
             var dxfFiles = await _databaseService.GetDxfFilesAsync(_userId);
 
@@ -117,7 +120,10 @@ namespace NumberArtistView
                     {
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
+                      
                         LayerColour = new LayerColorObject() { R = 255, G = 0, B = 0 }, // You might want to set actual color values here
+                      
+                        
                         Vertices = pline.Vertexes.Select(v => new VertexModel
                         {
                             X = v.Position.X,
@@ -158,16 +164,12 @@ namespace NumberArtistView
                 return;
             }
     
-            ResourceAccess resourceaccess =     new ResourceAccess();
+            ResourceAccess resourceaccess = new ResourceAccess();
 
-          
             try
             { 
-                
-                var dxfFile= await resourceaccess.GetResourceAsync(resourceName);
-
+                var dxfFile = await resourceaccess.GetResourceAsync(resourceName);
                 byte[] array = Encoding.ASCII.GetBytes(dxfFile);
-
 
                 using (var stream = new MemoryStream(array))
                 {
@@ -180,9 +182,11 @@ namespace NumberArtistView
 
                     polylineDrawable.Polylines = loaded.Entities.Polylines2D.Select(pline => new Pline2DModel
                     {
+                       
+
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
-                        LayerColour = pline.Layer.Color.Index   ,
+                        LayerColour = GetColour( pline.Layer.Color.Index),
                         Vertices = pline.Vertexes.Select(v => new VertexModel
                         {
                             X = v.Position.X,
@@ -190,17 +194,40 @@ namespace NumberArtistView
                             Bulge = v.Bulge,
                         }).ToList()
                     }).ToList();
-                    var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
-                   List<LayerItem> layers2 = new List<LayerItem>();
-                    
-                    
-                    var itemsPos=1;
-                    foreach (var layer in layers)
-                    {
 
-                        layers2.Add(new LayerItem() { LayerColour = new LayerColorObject() { R = 255, G = 0, B = 0 }, LayerIndex = itemsPos , LayerName= itemsPos.ToString() });
-                   itemsPos++;
+                    var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
+                    var layers2 = new List<LayerItem>();
+
+                    var colourSelectionList = new ColourSelectionList();
+                    // Ensure there's at least a fallback color (black) if selection is empty
+                    var fallback = Microsoft.Maui.Graphics.Colors.Black;
+
+                    for (int i = 0; i < layers.Count; i++)
+                    {
+                        var layerName = layers[i];
+
+                        // Determine colour by ordinal position (index)
+                        var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > i)
+                            ? colourSelectionList.Selection[i]
+                            : fallback;
+
+                        // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
+                        var layerColourObj = new LayerColorObject
+                        {
+                            R = (int)(selectedColor.Red * 255),
+                            G = (int)(selectedColor.Green * 255),
+                            B = (int)(selectedColor.Blue * 255),
+                            A = (int)(selectedColor.Alpha * 255)
+                        };
+
+                        layers2.Add(new LayerItem
+                        {
+                            color = Color.FromRgb(layerColourObj.R,layerColourObj.G,layerColourObj.B),
+                            LayerIndex = i + 1,
+                            LayerName = layerName
+                        });
                     }
+
                     LayersListView.ItemsSource = layers2;
 
                     if (layers.Any())
@@ -213,7 +240,6 @@ namespace NumberArtistView
                     }
 
                     GraphicsView.Invalidate();
-                 
                 }
             }
             catch (Exception ex)
@@ -222,6 +248,86 @@ namespace NumberArtistView
             }
         }
 
+        private Color GetColour(short index)
+        {
+            var fallback = Microsoft.Maui.Graphics.Colors.Black;
+
+            var colourSelectionList = new ColourSelectionList();
+            var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > index)
+                            ? colourSelectionList.Selection[index]
+                            : fallback;
+
+            // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
+            var layerColourObj = new LayerColorObject
+            {
+                R = (int)(selectedColor.Red * 255),
+                G = (int)(selectedColor.Green * 255),
+                B = (int)(selectedColor.Blue * 255),
+                A = (int)(selectedColor.Alpha * 255)
+            };
+
+
+            return Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B);
+
+
+        }
+        // Add this method to fix XC0002
+        private double currentScale = 1;
+        private double startScale = 1;
+        private double xOffset;
+        private double yOffset;
+
+        private void PinchGestureRecognizer_PinchUpdated(object sender, PinchGestureUpdatedEventArgs e)
+        {
+            // Handle pinch gesture here
+            // Example: You can use e.Scale, e.Status, etc.
+            if (e.Status == GestureStatus.Started)
+            {
+                startScale = Content.Scale;
+                Content.AnchorX = 0;
+                Content.AnchorY = 0;
+            }
+
+            if (e.Status == GestureStatus.Running)
+            {
+                // Calculate the scale factor to be applied.
+                currentScale += (e.Scale - 1) * startScale;
+                currentScale = Math.Max(1, currentScale);
+
+                // The ScaleOrigin is in relative coordinates to the wrapped user interface element,
+                // so get the X pixel coordinate.
+                var renderedX = Content.X + xOffset;
+                var deltaX = renderedX / Width;
+                var deltaWidth = Width / (Content.Width * startScale);
+                var originX = (e.ScaleOrigin.X - deltaX) * deltaWidth;
+
+                // The ScaleOrigin is in relative coordinates to the wrapped user interface element,
+                // so get the Y pixel coordinate.
+                var renderedY = Content.Y + yOffset;
+                var deltaY = renderedY / Height;
+                var deltaHeight = Height / (Content.Height * startScale);
+                var originY = (e.ScaleOrigin.Y - deltaY) * deltaHeight;
+
+                // Calculate the transformed element pixel coordinates.
+                var targetX = xOffset - ((originX * Content.Width) * (currentScale - startScale));
+                var targetY = yOffset - ((originY * Content.Height) * (currentScale - startScale));
+
+                // Apply translation based on the change in origin.
+                Content.TranslationX = Math.Clamp(targetX, -Content.Width * (currentScale - 1), 0);
+                Content.TranslationY = Math.Clamp(targetY, -Content.Height * (currentScale - 1), 0);
+
+                // Apply scale factor
+                Content.Scale = currentScale;
+            }
+
+            if (e.Status == GestureStatus.Completed)
+            {
+                // Store the translation delta's of the wrapped user interface element.
+                xOffset = Content.TranslationX;
+                yOffset = Content.TranslationY;
+            }
+        }
+        
         private void ColorBox_Tapped(object sender, TappedEventArgs e)
         {
             // Event handling logic goes here
@@ -310,6 +416,11 @@ namespace NumberArtistView
                     chColor = Colors.Red;
                     break;
             }
+
+        }
+
+        private void PanGestureRecognizer_PanUpdated(object sender, PanUpdatedEventArgs e)
+        {
 
         }
     }

@@ -1,4 +1,4 @@
-﻿namespace NumberArtistView
+﻿namespace NumberArtistView.Models
 {
     internal class VertexModel
     {

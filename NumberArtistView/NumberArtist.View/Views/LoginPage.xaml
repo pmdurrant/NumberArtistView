@@ -9,6 +9,8 @@
     </ContentPage.BindingContext>
     <VerticalStackLayout Spacing="10" Padding="20" VerticalOptions="Center">
         <Label Text="Welcome" FontSize="Header" HorizontalOptions="Center" />
+        <Label Text="Api Ip Address"></Label>
+        <Entry Placeholder="Api Ip Address" Text="{Binding IpAddress}" />
         <Entry Placeholder="Username" Text="{Binding Username}" />
         <Entry Placeholder="Password" IsPassword="True" Text="{Binding Password}" />
         <Button Text="Login" Command="{Binding LoginCommand}" HorizontalOptions="Center" />

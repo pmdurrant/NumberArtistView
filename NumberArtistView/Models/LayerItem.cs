@@ -43,6 +43,7 @@ namespace NumberArtistView.Models
 
         }
         public LayerColorObject LayerColour { get; set; }
+        public Color color { get; set; }
         public int LayerIndex { get; set; }
         public string LayerName { get; set; }
         public List<LayerColorObject> ColourSelection { get; set; }

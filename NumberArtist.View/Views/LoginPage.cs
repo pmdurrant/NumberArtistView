@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+csharp NumberArtistView\NumberArtist.View\Views\LoginPage.cs
 using Microsoft.Maui.Controls;
 using NumberArtist.View.ViewModels;
 
