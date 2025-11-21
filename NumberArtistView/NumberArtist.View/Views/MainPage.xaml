@@ -26,6 +26,17 @@
         <BoxView Grid.Row="1" Grid.Column="1" WidthRequest="5" HorizontalOptions="Center" VerticalOptions="Fill" Color="Gray" />
 
         <ListView x:Name="LayersListView" Grid.Row="1" Grid.Column="2">
+            <!-- Header row with master checkbox to toggle all items -->
+            <ListView.Header>
+                <Grid Padding="5" ColumnDefinitions="Auto,*,Auto" BackgroundColor="Transparent">
+                    <CheckBox x:Name="AllLayersCheckBox"
+                              VerticalOptions="Center"
+                              CheckedChanged="AllLayersCheckBox_CheckedChanged" />
+                    <Label Text="Layer" VerticalOptions="Center" Grid.Column="1" />
+                    <Label Text="Color" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
+                </Grid>
+            </ListView.Header>
+
             <ListView.ItemTemplate>
                 <DataTemplate>
                     <ViewCell>

@@ -25,4 +25,10 @@ public partial class LoginPage : ContentPage
             _ = vm.InitializeAsync(); // fire-and-forget; errors handled inside InitializeAsync
         }
     }
+
+
+    private void OnTogglePasswordVisibilityClicked(object? sender, EventArgs e)
+    {
+        PasswordEntry.IsPassword = !PasswordEntry.IsPassword;
+    }
 }

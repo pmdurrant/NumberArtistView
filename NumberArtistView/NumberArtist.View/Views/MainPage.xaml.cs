@@ -1,6 +1,6 @@
 using Core.Business.Objects;
+using Microsoft.Maui.Controls;
 using netDxf;
-
 using Newtonsoft.Json;
 using NumberArtist.View.Views;
 using NumberArtistView.Models;
@@ -9,8 +9,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
-
 
 namespace NumberArtistView
 {
@@ -77,9 +77,11 @@ namespace NumberArtistView
 
             var dxfFiles = await _databaseService.GetDxfFilesAsync(_userId);
 
+
+            var fred = dxfFiles.DistinctBy<DxfFileEntry, string>(x => x.ResourceName).ToList();
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                DxfFilePicker.ItemsSource = dxfFiles;
+                DxfFilePicker.ItemsSource = fred;
                 DxfFilePicker.ItemDisplayBinding = new Binding("Name");
 
                 if (dxfFiles.Any())
@@ -459,6 +461,57 @@ namespace NumberArtistView
                     GraphicsView.Invalidate();
                 }
             }
+        }
+      
+        private void AllLayersCheckBox_CheckedChanged(object sender, CheckedChangedEventArgs e)
+        {
+            LoadList( e.Value);
+             
+        }
+
+        private void LoadList(bool IsVisible)
+        {
+            var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
+            var layers2 = new List<LayerItem>();
+
+            var colourSelectionList = new ColourSelectionList();
+            // Ensure there's at least a fallback color (black) if selection is empty
+            var fallback = Microsoft.Maui.Graphics.Colors.Black;
+
+            for (int i = 0; i < layers.Count; i++)
+            {
+                var layerName = layers[i];
+
+                // Determine colour by ordinal position (index)
+                var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > i)
+                    ? colourSelectionList.Selection[i]
+                    : fallback;
+
+                // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
+                var layerColourObj = new LayerColorObject
+                {
+                    R = (int)(selectedColor.Red * 255),
+                    G = (int)(selectedColor.Green * 255),
+                    B = (int)(selectedColor.Blue * 255),
+                    A = (int)(selectedColor.Alpha * 255)
+                };
+
+                layers2.Add(new LayerItem
+                {
+                    color = Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B),
+                    LayerIndex = i + 1,
+                    LayerName = layerName,
+                    IsVisible = IsVisible
+                });
+            }
+
+            // Wire up property changed so toggling boxes updates drawable and view
+            foreach (var li in layers2)
+            {
+                li.PropertyChanged += LayerItem_PropertyChanged;
+            }
+
+            LayersListView.ItemsSource = layers2;
         }
     }
 }
