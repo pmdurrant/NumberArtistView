@@ -43,7 +43,10 @@ namespace NumberArtistView.Services
                 httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             }
 
-            Guid userId = Guid.Parse(await SecureStorage.GetAsync("userId"));
+            var userIdString = await SecureStorage.GetAsync("userId");
+            if (string.IsNullOrEmpty(userIdString))
+                throw new InvalidOperationException("User ID not found in secure storage.");
+            Guid userId = Guid.Parse(userIdString);
 
             var response = await httpClient.GetAsync("api/dxffiles");
             if (response.IsSuccessStatusCode)
@@ -56,7 +59,7 @@ namespace NumberArtistView.Services
                     try
                     {
                             // Normalize the resource name (stable unique identifier)
-                        var resourceName = fileFromServer.storedFileName?.Trim();
+                        var resourceName = fileFromServer.storedFileName != null ? fileFromServer.storedFileName.Trim() : string.Empty;
 
                         // Check existence by ResourceName + AppUserId (stable key)
                         var existingFile = await _database.Table<DxfFileEntry>()
@@ -67,7 +70,7 @@ namespace NumberArtistView.Services
                         {
                             var newFileEntry = new DxfFileEntry
                             {
-                                Name = fileFromServer.fileName?.Trim(),
+                                Name = fileFromServer.fileName != null ? fileFromServer.fileName.Trim() : string.Empty,
                                 ResourceName = resourceName,
                                 AppUserId = userId
                             };
@@ -120,7 +123,10 @@ namespace NumberArtistView.Services
                 httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             }
 
-            Guid userId = Guid.Parse(await SecureStorage.GetAsync("userId"));
+            var userIdString = await SecureStorage.GetAsync("userId");
+            if (string.IsNullOrEmpty(userIdString))
+                throw new InvalidOperationException("User ID not found in secure storage.");
+            Guid userId = Guid.Parse(userIdString);
 
             var response = await httpClient.GetAsync($"api/dxffiles/GetResource/{resourceName}");
             if (response.IsSuccessStatusCode)
