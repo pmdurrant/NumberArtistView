@@ -18,5 +18,8 @@ namespace Core.Business.Objects
         // Foreign key for the user
         public string AppUserId { get; set; }
         public AppUser AppUser { get; set; }
+
+        public int ReferenceDrawingId { get; set; }
+
     }
 }
