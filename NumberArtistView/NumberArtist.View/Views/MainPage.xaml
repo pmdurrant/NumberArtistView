@@ -3,22 +3,35 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="NumberArtistView.MainPage"
              xmlns:drawable="clr-namespace:NumberArtistView"
+             x:Name="Root"
              Title="Number Artist">
     <Grid RowDefinitions="Auto, *, Auto" ColumnDefinitions="*, Auto, 250">
 
         <!-- Row 0: File Selection -->
-        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
-                SelectedIndexChanged="DxfFilePicker_SelectedIndexChanged"/>
+        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" 
+                SelectedIndexChanged="DxfFilePicker_SelectedIndexChanged"  />
 
         <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="2" />
 
         <!-- Row 1: Main Content -->
-        <GraphicsView x:Name="GraphicsView" Grid.Row="1" Grid.Column="0">
-            <GraphicsView.GestureRecognizers>
-                <PinchGestureRecognizer PinchUpdated="PinchGestureRecognizer_PinchUpdated" />
-                <PanGestureRecognizer PanUpdated="PanGestureRecognizer_PanUpdated" />
-            </GraphicsView.GestureRecognizers>
-        </GraphicsView>
+        <!-- Use a Grid with an Image as background and bind Image.Source to the page property via x:Reference -->
+        <Grid Grid.Row="1" Grid.Column="0">
+            <Image x:Name="BackgroundImageView"
+                   Source="{Binding BackgroundImage, Source={x:Reference Root}}"
+                   Aspect="AspectFill"
+                   Opacity="0.5"
+                   IsEnabled="True"
+                   IsVisible="True"
+                   InputTransparent="True"
+                   VerticalOptions="Fill"
+                   HorizontalOptions="Fill" />
+            <GraphicsView x:Name="GraphicsView" BackgroundColor="Transparent" VerticalOptions="Fill" HorizontalOptions="Fill">
+                <GraphicsView.GestureRecognizers>
+                    <PinchGestureRecognizer PinchUpdated="PinchGestureRecognizer_PinchUpdated" />
+                    <PanGestureRecognizer PanUpdated="PanGestureRecognizer_PanUpdated" />
+                </GraphicsView.GestureRecognizers>
+            </GraphicsView>
+        </Grid>
 
         <ProgressBar x:Name="LoadingProgressBar" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
 
@@ -60,7 +73,8 @@
         </ListView>
 
         <!-- Row 2: Logout -->
-        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" HorizontalOptions="FillAndExpand"/>
+        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" HorizontalOptions="Fill"/>
+        <Button x:Name="DiagnoticsButton" Text="Diagnostics" Clicked="DiagnoticsButton_Clicked" Grid.Row="2" Grid.Column="2" HorizontalOptions="End"/>
 
     </Grid>
 </ContentPage>

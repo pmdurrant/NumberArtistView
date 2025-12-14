@@ -1,4 +1,5 @@
 using Core.Business.Objects;
+using Core.Business.Objects.Models;
 using Microsoft.Maui.Controls;
 using netDxf;
 using Newtonsoft.Json;
@@ -6,6 +7,7 @@ using NumberArtist.View.Views;
 using NumberArtistView.Models;
 using NumberArtistView.Services;
 using System.ComponentModel;
+using System.Data.Common;
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Reflection;
@@ -20,10 +22,16 @@ namespace NumberArtistView
         private object dxfFileEntry;
         private readonly DatabaseService _databaseService;
         private readonly Guid _userId;
+        public ImageSource? BackgroundImage { get; set; }
+
 
         public MainPage(DatabaseService databaseService)
         {
             InitializeComponent(); // This now correctly loads the UI from MainPage.xaml
+            ResourceAccess ra = new ResourceAccess();
+            BindingContext = this;
+           
+            OnPropertyChanged(nameof(BackgroundImage));
             _databaseService = databaseService;
 
             var userIdString = Preferences.Get("userId", string.Empty); // Get the user ID as string
@@ -51,7 +59,18 @@ namespace NumberArtistView
         {
             base.OnAppearing();
 
-         //   Task.Run(async () => await _databaseService.CopyFilesFromServerToLocalDb());
+            //try
+            //{
+            //    // Run the diagnostic for the specific id
+            //    var ra = new NumberArtistView.Services.ResourceAccess();
+            //    await ra.DiagnoseReferenceDrawingLookupAsync(1037929613);
+            //}
+            //catch (Exception ex)
+            //{
+            //    Debug.WriteLine($"Diagnose call threw: {ex.Message}");
+            //}
+
+            //   Task.Run(async () => await _databaseService.CopyFilesFromServerToLocalDb);
 
 
             Task.Run(async () => await LoadDxfFilesIntoPicker());
@@ -78,10 +97,10 @@ namespace NumberArtistView
             var dxfFiles = await _databaseService.GetDxfFilesAsync(_userId);
 
 
-            var fred = dxfFiles.DistinctBy<DxfFileEntry, string>(x => x.ResourceName).ToList();
+            var entryFiles = dxfFiles.DistinctBy<DxfFileEntry, string>(x => x.ResourceName).ToList();
             MainThread.BeginInvokeOnMainThread(() =>
             {
-                DxfFilePicker.ItemsSource = fred;
+                DxfFilePicker.ItemsSource = entryFiles;
                 DxfFilePicker.ItemDisplayBinding = new Binding("Name");
 
                 if (dxfFiles.Any())
@@ -124,7 +143,7 @@ namespace NumberArtistView
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
                       
-                        LayerColour = new LayerColorObject() { R = 255, G = 0, B = 0 }, // You might want to set actual color values here
+                        LayerColour = new NumberArtistView.Models.LayerColorObject() { R = 255, G = 0, B = 0 }, // You might want to set actual color values here
                       
                         
                         Vertices = pline.Vertexes.Select(v => new VertexModel
@@ -172,79 +191,165 @@ namespace NumberArtistView
                 });
             }
         }
-
-        private async Task LoadDxfData(string resourceName)
+        // Changed to return Task so callers can await and avoid blocking UI thread
+        private async Task LoadBackgroundResourceData(DxfFileEntry dxfFile)
         {
-            if (string.IsNullOrEmpty(resourceName))
+
+            if (dxfFile == null)
             {
-                await DisplayAlert("Error", "Invalid resource name.", "OK");
+                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Invalid resource Id.", "OK"));
                 return;
             }
-    
+
             ResourceAccess resourceaccess = new ResourceAccess();
 
-            try
+
+            var backgroundFile = await resourceaccess.GetBackgroundResourceAsync(dxfFile.ReferenceDrawingId);
+            //hhhh
+            //
+            if (string.IsNullOrEmpty(backgroundFile))
+            {
+                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Failed to load background resource.", "OK"));
+                return;
+            }
+            if(backgroundFile != null)
             { 
+           
+}
+         
+
+
+            byte[] array = Encoding.ASCII.GetBytes(backgroundFile);
+
+            using (var stream = new MemoryStream(array))
+            {
+                // Load the background image from the stream
+                BackgroundImage = ImageSource.FromStream(() => stream);
+         
+              
+                // ImageBrush is not accessible; set background color as a fallback
+                GraphicsView.BackgroundColor = Colors.Transparent;
+                // If you want to display the image, use an Image control in your layout.
+            }
+        }
+        // Plan / Pseudocode (detailed):
+        // 1. Validate input 'resourceName' and request bytes from ResourceAccess.
+        // 2. If returned byte[] is null or empty, show an alert on main thread and return.
+        // 3. Copy byte[] into a local buffer to avoid accidental mutation and to be safe across threads.
+        // 4. Offload DXF parsing to a background thread with Task.Run:
+        //    - Create a MemoryStream from the buffer on that background thread.
+        //    - Call DxfDocument.Load(stream) inside the Task.Run so UI thread is not blocked.
+        //    - Return the loaded DxfDocument (or null if loading failed).
+        private async Task LoadDxfData(string resourceName)
+        {
+            if (string.IsNullOrWhiteSpace(resourceName))
+            {
+                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Invalid resource name.", "OK"));
+                return;
+            }
+
+            var resourceaccess = new ResourceAccess();
+
+            try
+            {
                 var dxfFile = await resourceaccess.GetResourceAsync(resourceName);
-                byte[] array = Encoding.ASCII.GetBytes(dxfFile);
 
-                using (var stream = new MemoryStream(array))
+                // Validate buffer
+                if (dxfFile == null || dxfFile.Length == 0)
                 {
-                    DxfDocument loaded = DxfDocument.Load(stream);
-                    if (loaded == null)
+                    await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "DXF resource is empty or could not be loaded.", "OK"));
+                    return;
+                }
+
+                // Make a local copy of the bytes to be safe across threads
+                var buffer = new byte[dxfFile.Length];
+                Array.Copy(dxfFile, buffer, dxfFile.Length);
+
+                // Load the DXF document on a background thread to avoid blocking the UI
+                DxfDocument loaded = null!;
+                try
+                {
+                    loaded = await Task.Run(() =>
                     {
-                        await DisplayAlert("Error", "Error loading DXF file.", "OK");
-                        return;
-                    }
+                        using (var ms = new MemoryStream(buffer, writable: false))
+                        {
+                            // DxfDocument.Load can be CPU bound; run on background thread
+                            return DxfDocument.Load(ms);
+                        }
+                    });
+                }
+                catch (Exception bgEx)
+                {
+                    // If parsing fails on background thread, surface error to UI
+                    await MainThread.InvokeOnMainThreadAsync(() =>
+                        DisplayAlert("Error", $"Error parsing DXF file: {bgEx.Message}", "OK"));
+                    return;
+                }
 
-                    polylineDrawable.Polylines = loaded.Entities.Polylines2D.Select(pline => new Pline2DModel
+                if (loaded == null)
+                {
+                    await MainThread.InvokeOnMainThreadAsync(() =>
+                        DisplayAlert("Error", "Error loading DXF file (DxfDocument.Load returned null).", "OK"));
+                    return;
+                }
+
+                // Prepare polylines and layers on background thread to minimize UI work
+                var plines = loaded.Entities.Polylines2D.Select(pline => new Pline2DModel
+                {
+                    IsClosed = pline.IsClosed,
+                    Layer = pline.Layer?.Name ?? string.Empty,
+                    LayerColour = GetColourSafe(pline.Layer?.Color.Index ?? 0),
+                    Vertices = pline.Vertexes.Select(v => new VertexModel
                     {
-                        IsClosed = pline.IsClosed,
-                        Layer = pline.Layer.Name,
-                        LayerColour = GetColour( pline.Layer.Color.Index),
-                        Vertices = pline.Vertexes.Select(v => new VertexModel
-                        {
-                            X = v.Position.X,
-                            Y = v.Position.Y,
-                            Bulge = v.Bulge,
-                        }).ToList()
-                    }).ToList();
+                        X = v.Position.X,
+                        Y = v.Position.Y,
+                        Bulge = v.Bulge,
+                    }).ToList()
+                }).ToList();
 
-                    var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
-                    var layers2 = new List<LayerItem>();
+                var layers = plines.Select(p => p.Layer ?? string.Empty).Distinct().OrderBy(l => l).ToList();
 
-                    var colourSelectionList = new ColourSelectionList();
-                    // Ensure there's at least a fallback color (black) if selection is empty
-                    var fallback = Microsoft.Maui.Graphics.Colors.Black;
+                // Build LayerItem list (no UI assignment yet)
+                var layers2 = new List<LayerItem>();
+                var colourSelectionList = new ColourSelectionList();
+                var fallback = Microsoft.Maui.Graphics.Colors.Black;
 
-                    for (int i = 0; i < layers.Count; i++)
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    var layerName = layers[i];
+
+                    var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > i)
+                        ? colourSelectionList.Selection[i]
+                        : fallback;
+
+                    var layerColourObj = new NumberArtistView.Models.LayerColorObject
                     {
-                        var layerName = layers[i];
+                        R = (int)(selectedColor.Red * 255),
+                        G = (int)(selectedColor.Green * 255),
+                        B = (int)(selectedColor.Blue * 255),
+                        A = (int)(selectedColor.Alpha * 255)
+                    };
 
-                        // Determine colour by ordinal position (index)
-                        var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > i)
-                            ? colourSelectionList.Selection[i]
-                            : fallback;
+                    layers2.Add(new LayerItem
+                    {
+                        color = Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B),
+                        LayerIndex = i + 1,
+                        LayerName = layerName,
+                        IsVisible = true,
+                        LayerColour = layerColourObj
+                    });
+                }
 
-                        // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
-                        var layerColourObj = new LayerColorObject
-                        {
-                            R = (int)(selectedColor.Red * 255),
-                            G = (int)(selectedColor.Green * 255),
-                            B = (int)(selectedColor.Blue * 255),
-                            A = (int)(selectedColor.Alpha * 255)
-                        };
+                // Marshal final UI updates to main thread
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    // Assign polylines
+                    polylineDrawable.Polylines = plines;
 
-                        layers2.Add(new LayerItem
-                        {
-                            color = Color.FromRgb(layerColourObj.R,layerColourObj.G,layerColourObj.B),
-                            LayerIndex = i + 1,
-                            LayerName = layerName,
-                            IsVisible = true
-                        });
-                    }
+                    // Ensure SelectedLayer is never set to null (use empty string when none)
+                    polylineDrawable.SelectedLayer = layers2.Any() ? layers2[0].LayerName : string.Empty;
 
-                    // Wire up property changed so toggling boxes updates drawable and view
+                    // Wire up PropertyChanged handlers and set ItemsSource
                     foreach (var li in layers2)
                     {
                         li.PropertyChanged += LayerItem_PropertyChanged;
@@ -252,49 +357,48 @@ namespace NumberArtistView
 
                     LayersListView.ItemsSource = layers2;
 
+                    // initialize drawable visible layers from list
+                    polylineDrawable.VisibleLayers = layers2.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+
                     if (layers2.Any())
                     {
                         LayersListView.SelectedItem = layers2[0];
                     }
                     else
                     {
-                        polylineDrawable.SelectedLayer = null;
+                        polylineDrawable.SelectedLayer = string.Empty;
                     }
 
-                    // initialize drawable visible layers from list
-                    polylineDrawable.VisibleLayers = layers2.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
-
+                    // Request redraw on UI thread
                     GraphicsView.Invalidate();
-                }
+                });
             }
             catch (Exception ex)
             {
-                await DisplayAlert("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK");
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                    DisplayAlert("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK"));
             }
-        }
 
-        private Color GetColour(short index)
-        {
-            var fallback = Microsoft.Maui.Graphics.Colors.Black;
-
-            var colourSelectionList = new ColourSelectionList();
-            var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > index)
-                            ? colourSelectionList.Selection[index]
-                            : fallback;
-
-            // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
-            var layerColourObj = new LayerColorObject
+            // Local helper to safely return a Color-like object used in the project (keeps parity with GetColour)
+            static Color GetColourSafe(short index)
             {
-                R = (int)(selectedColor.Red * 255),
-                G = (int)(selectedColor.Green * 255),
-                B = (int)(selectedColor.Blue * 255),
-                A = (int)(selectedColor.Alpha * 255)
-            };
+                // Reuse existing GetColour logic if available on instance; this static fallback mirrors GetColour behavior.
+                var colourSelectionList = new ColourSelectionList();
+                var fallback = Microsoft.Maui.Graphics.Colors.Black;
+                var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > index)
+                    ? colourSelectionList.Selection[index]
+                    : fallback;
 
+                var layerColourObj = new NumberArtistView.Models.LayerColorObject
+                {
+                    R = (int)(selectedColor.Red * 255),
+                    G = (int)(selectedColor.Green * 255),
+                    B = (int)(selectedColor.Blue * 255),
+                    A = (int)(selectedColor.Alpha * 255)
+                };
 
-            return Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B);
-
-
+                return Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B);
+            }
         }
         // Add this method to fix XC0002
         private double currentScale = 1;
@@ -358,11 +462,21 @@ namespace NumberArtistView
             // Event handling logic goes here
         }
 
-        private void DxfFilePicker_SelectedIndexChanged(object sender, EventArgs e)
+        // Make event handler async so we can await database calls instead of blocking
+        private async void DxfFilePicker_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (DxfFilePicker.SelectedItem is DxfFileEntry selectedFile)
             {
-                LoadDxfData(selectedFile.ResourceName);
+                _ = LoadDxfData(selectedFile.ResourceName);
+
+                // Use the injected database service and ensure it's initialized
+                await _databaseService.InitializeAsync();
+
+                var dxffile = await _databaseService.GetDxfFileByNameAsync(selectedFile.ResourceName);
+                if (dxffile != null)
+                {
+                    await LoadBackgroundResourceData(dxffile);
+                }
 
                 GraphicsView.Invalidate(); // Redraw the view
             }
@@ -488,7 +602,7 @@ namespace NumberArtistView
                     : fallback;
 
                 // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
-                var layerColourObj = new LayerColorObject
+                var layerColourObj = new NumberArtistView.Models.LayerColorObject
                 {
                     R = (int)(selectedColor.Red * 255),
                     G = (int)(selectedColor.Green * 255),
@@ -512,6 +626,29 @@ namespace NumberArtistView
             }
 
             LayersListView.ItemsSource = layers2;
+        }
+
+        private async void DiagnoticsButton_Clicked(object sender, EventArgs e)
+        {
+
+            try
+            {
+                var ra = new ResourceAccess();
+                await ra.DiagnoseReferenceDrawingLookupAsync(1037929613);
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    // Optional UI feedback that the diagnostic ran.
+                    DisplayAlert("Diagnostics", "DiagnoseReferenceDrawingLookupAsync completed. See Debug output.", "OK");
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Diagnostics button error: {ex.Message}");
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    DisplayAlert("Error", $"Diagnostics failed: {ex.Message}", "OK");
+                });
+            }
         }
     }
 }

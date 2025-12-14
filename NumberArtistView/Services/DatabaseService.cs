@@ -1,4 +1,5 @@
 using Core.Business.Objects;
+using Core.Business.Objects.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Bson;
 using NumberArtistView.Services.Models;
@@ -7,113 +8,267 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace NumberArtistView.Services
 {
-    public class DatabaseService
+    public class  DatabaseService
     {
         private SQLiteAsyncConnection _database;
+        private  string _filesPathRef;
+        private string dbPath;
 
         public DatabaseService()
         {
-            var dbPath = Path.Combine(FileSystem.AppDataDirectory, "NumberArtist.db3");
+            try
+            {
+                Debug.WriteLine("DatabaseService: constructor start");
+                dbPath = Constants.DatabasePath;
+                  Debug.WriteLine($"DatabaseService: DB path = {Constants.DatabasePath}");
 
-            _database = new SQLiteAsyncConnection(dbPath);
-            _database.CreateTableAsync<Core.Business.Objects.DxfFileEntry>().Wait();
+                _database = new SQLiteAsyncConnection(dbPath,Constants.Flags);
+                _database.CreateTableAsync<Core.Business.Objects.DxfFileEntry>().Wait();
+                Debug.WriteLine("DatabaseService: Ensured DxfFileEntry table exists");
 
-            // Ensure a unique index to avoid duplicate resource entries per user.
-            // This enforces uniqueness at the DB level and prevents race/duplicate insert issues.
-            _database.ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS idx_dxffile_res_user ON DxfFileEntry(ResourceName, AppUserId);").Wait();
+                // Ensure ReferenceDrawing table exists
+                _database.CreateTableAsync<ReferenceDrawing>().Wait();
+                _filesPathRef = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files");
+
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"DatabaseService: constructor error: {ex}");
+                Console.WriteLine($"DatabaseService: constructor error: {ex}");
+                throw;
+            }
         }
 
         public async Task InitializeAsync()
         {
+            Debug.WriteLine("DatabaseService: InitializeAsync called");
             // Use await instead of .Wait()
             await CopyFilesFromServerToLocalDb();
+            Debug.WriteLine("DatabaseService: InitializeAsync completed");
         }
 
-        public async Task CopyFilesFromServerToLocalDb()
+        public async Task<ReferenceDrawing> GetDxfFileBackgroundIdAsyncByDxfFileId (long dxfFileId)
         {
-            var httpClient = new HttpClient();
-            httpClient.BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/");
-
-            var token = Preferences.Get("auth_token", string.Empty);
-            if (!string.IsNullOrEmpty(token))
+            Debug.WriteLine($"DatabaseService: GetDxfFileBackgroundIdAsyncByDxfFileId dxfFileId={dxfFileId}");
+            var result = await _database.Table<ReferenceDrawing>()
+                .Where(f => f.DxfFileId == dxfFileId)
+                .FirstOrDefaultAsync();
+            Debug.WriteLine($"DatabaseService: Found ReferenceDrawing={(result != null ? result.Name : "<null>")}");
+            return result;
+        }
+         public async Task CopyFilesFromServerToLocalDb()
+        {
+            Debug.WriteLine("DatabaseService: CopyFilesFromServerToLocalDb start");
+            try
             {
-                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-            }
+                using var httpClient = new HttpClient { BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/") };
 
-            var userIdString = await SecureStorage.GetAsync("userId");
-            if (string.IsNullOrEmpty(userIdString))
-                throw new InvalidOperationException("User ID not found in secure storage.");
-            Guid userId = Guid.Parse(userIdString);
+                var token = Preferences.Get("auth_token", string.Empty);
+                if (!string.IsNullOrEmpty(token))
+                {
+                    httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                    Debug.WriteLine("DatabaseService: Added auth token to request headers");
+                }
 
-            var response = await httpClient.GetAsync("api/dxffiles");
-            if (response.IsSuccessStatusCode)
-            {
+                var userIdString = await SecureStorage.GetAsync("userId");
+                if (string.IsNullOrEmpty(userIdString))
+                {
+                    Debug.WriteLine("DatabaseService: userId not found in secure storage");
+                    throw new InvalidOperationException("User ID not found in secure storage.");
+                }
+                Guid userId = Guid.Parse(userIdString);
+                Debug.WriteLine($"DatabaseService: Using userId {userId}");
+
+                var response = await httpClient.GetAsync("api/DxfFiles/GetFiles");
+                Debug.WriteLine($"DatabaseService: Server responded with status {response.StatusCode}");                if (!response.IsSuccessStatusCode)
+                {
+                    Debug.WriteLine($"DatabaseService: Failed to fetch dxffiles: {response.StatusCode}");
+                    return;
+                }
+
                 var json = await response.Content.ReadAsStringAsync();
-                var entities = JsonConvert.DeserializeObject<List<Root>>(json);
+                // Ensure entities is never null to avoid CS8602 when iterating
+                var entities = JsonConvert.DeserializeObject<List<Root>>(json) ?? new List<Root>();
+                Debug.WriteLine($"DatabaseService: Received {entities.Count} files from server");
 
                 foreach (var fileFromServer in entities)
                 {
+                    if (fileFromServer == null)
+                    {
+                        Debug.WriteLine("DatabaseService: Skipping null fileFromServer entry");
+                        continue;
+                    }
+
                     try
                     {
-                            // Normalize the resource name (stable unique identifier)
                         var resourceName = fileFromServer.storedFileName != null ? fileFromServer.storedFileName.Trim() : string.Empty;
 
-                        // Check existence by ResourceName + AppUserId (stable key)
                         var existingFile = await _database.Table<DxfFileEntry>()
                             .Where(f => f.ResourceName == resourceName && f.AppUserId == userId)
                             .FirstOrDefaultAsync();
 
-                        if (existingFile == null)
+                        if (existingFile != null)
                         {
-                            var newFileEntry = new DxfFileEntry
-                            {
-                                Name = fileFromServer.fileName != null ? fileFromServer.fileName.Trim() : string.Empty,
-                                ResourceName = resourceName,
-                                AppUserId = userId
-                            };
+                            Debug.WriteLine($"DatabaseService: DxfFileEntry already exists ResourceName={resourceName} Id={existingFile.Id}");
+                            continue;
+                        }
 
-                            try
+                        var newFileEntry = new DxfFileEntry
+                        {
+                            Name = fileFromServer.fileName != null ? fileFromServer.fileName.Trim() : string.Empty,
+                            ResourceName = resourceName,
+                            AppUserId = userId,
+                            ReferenceDrawingId = 0L
+                        };
+
+                        // Safely convert ReferenceDrawingId if present and in range
+                        try
+                        {
+                            // If ReferenceDrawingId is nullable or a numeric type, handle appropriately
+                            // Use dynamic checks to avoid compile-time assumptions about Root
+                            var refValue = fileFromServer.ReferenceDrawingId;
+                            if (refValue != null)
                             {
-                                await _database.InsertAsync(newFileEntry);
-                            }
-                            catch (SQLiteException)
-                            {
-                                // If another thread/process inserted the same resource concurrently
-                                // the unique index will raise a constraint error; ignore it.
+                                // Attempt to convert to long safely
+                                try
+                                {
+                                    long refLong = Convert.ToInt64(refValue);
+                                    newFileEntry.ReferenceDrawingId = refLong;
+                                }
+                                catch (OverflowException)
+                                {
+                                    Debug.WriteLine($"DatabaseService: ReferenceDrawingId out of Int64 range: {refValue}; defaulting to 0.");
+                                    newFileEntry.ReferenceDrawingId = 0L;
+                                }
+                                catch (Exception)
+                                {
+                                    Debug.WriteLine($"DatabaseService: Unable to convert ReferenceDrawingId: {refValue}; defaulting to 0.");
+                                    newFileEntry.ReferenceDrawingId = 0L;
+                                }
                             }
                         }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"DatabaseService: Error reading ReferenceDrawingId: {ex.Message}");
+                        }
+
+                        await _database.InsertAsync(newFileEntry);
+                        Debug.WriteLine($"DatabaseService: Inserted new DxfFileEntry ResourceName={resourceName} Id={newFileEntry.Id}");
+
+                        // Optionally fetch background resource (await properly); don't insert the raw string as a DB row.
+                        try
+                        {
+                            var resource = new ResourceAccess();
+                            var backgroundString = await resource.GetBackgroundResourceAsync(newFileEntry.ReferenceDrawingId);
+                            Debug.WriteLine($"DatabaseService: Fetched background resource for RefId={newFileEntry.ReferenceDrawingId} (length={backgroundString?.Length ?? 0})");
+                            // If you need to persist the background content, save to file or a dedicated table here.
+
+                            MemoryStream ms = new MemoryStream();
+                           await ms.ReadAsync(System.Text.Encoding.UTF8.GetBytes(backgroundString ?? string.Empty));
+
+                            var outentity = ms.ToArray();
+                            if (outentity != null)
+                            {
+                                _filesPathRef += "\\" + resourceName;
+
+                                File.WriteAllBytes(_filesPathRef, outentity);
+                                Debug.WriteLine($"DatabaseService: Wrote resource to file {_filesPathRef    }");
+                            }
+
+
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"DatabaseService: Error fetching background resource: {ex.Message}");
+                        }
+
+                        var referenceDrawing = new ReferenceDrawing
+                        {
+                          
+                         
+                            Name = newFileEntry.Name,
+                            DxfFileId = newFileEntry.Id
+                        };
+                        await _database.InsertAsync(referenceDrawing);
+                        Debug.WriteLine($"DatabaseService: Inserted ReferenceDrawing Id={referenceDrawing.Id} for DxfFileEntry Id={newFileEntry.Id}");
+                    }
+                    catch (SQLiteException sx)
+                    {
+                        Debug.WriteLine($"DatabaseService: SQLiteException inserting ResourceName={fileFromServer?.storedFileName ?? "<unknown>"} : {sx.Message}");
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error processing file: {ex.Message}");
+                        Debug.WriteLine($"DatabaseService: Exception inserting ResourceName={fileFromServer?.storedFileName ?? "<unknown>"} : {ex.Message}");
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"DatabaseService: Exception in CopyFilesFromServerToLocalDb: {ex}");
+                Console.WriteLine($"DatabaseService: Exception in CopyFilesFromServerToLocalDb: {ex}");
+                throw;
+            }
+            finally
+            {
+                Debug.WriteLine("DatabaseService: CopyFilesFromServerToLocalDb completed");
             }
             return;
         }
 
         public Task<int> GetRecordCount()
         {
+            Debug.WriteLine("DatabaseService: GetRecordCount called");
             return _database.Table<DxfFileEntry>().CountAsync();
         }
 
         public async Task<List<DxfFileEntry>> GetDxfFilesAsync(Guid userId)
         {
+            Debug.WriteLine($"DatabaseService: GetDxfFilesAsync userId={userId}");
             return await _database.Table<DxfFileEntry>().Where(f => f.AppUserId == userId).ToListAsync();
         }
 
         public async Task<DxfFileEntry?> GetDxfFileByNameAsync(string resourceName)
         {
+            Debug.WriteLine($"DatabaseService: GetDxfFileByNameAsync resourceName={resourceName}");
             return await _database.Table<DxfFileEntry>()
                 .Where(f => f.ResourceName == resourceName)
                 .FirstOrDefaultAsync();
         }
+        public async Task<int> GetDxfFileIdAsync(string resourceName)
+        {
+            Debug.WriteLine($"DatabaseService: GetDxfFileIdAsync resourceName={resourceName}");
+            var result= await _database.Table<DxfFileEntry>()
+                .Where(f => f.ResourceName == resourceName)
+                .FirstOrDefaultAsync();
 
+            return result.Id;
+        }
+        public async Task<DxfFile> GetDxfFileByReferenceDrawingIdAsync(long referenceDrawingId)
+        {
+            Debug.WriteLine($"DatabaseService: GetDxfFileByReferenceDrawingIdAsync ReferenceDrawingId={referenceDrawingId}");
+            var result = await _database.Table<DxfFileEntry>()
+                .Where(f => f.ReferenceDrawingId == referenceDrawingId)
+                .FirstOrDefaultAsync();
+
+            DxfFile dxfFile = new DxfFile
+            {
+                Id = result.Id,
+                FileName = result.Name,
+                StoredFileName = result.ResourceName,
+                AppUserId = result.AppUserId.ToString(),
+                ReferenceDrawingId = (int)result.ReferenceDrawingId
+            };
+
+
+            return dxfFile;
+        }
         public async Task<DxfFileEntry?> GetDxfFileBytesAsync(string resourceName)
         {
+            Debug.WriteLine($"DatabaseService: GetDxfFileBytesAsync resourceName={resourceName}");
             var httpClient = new HttpClient();
             httpClient.BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/");
 
@@ -147,6 +302,7 @@ namespace NumberArtistView.Services
                     if (outentity != null)
                     {
                         File.WriteAllBytes(resourceName, outentity);
+                        Debug.WriteLine($"DatabaseService: Wrote resource to file {resourceName}");
                     }
 
                     var fileEntry = new DxfFileEntry
@@ -154,12 +310,16 @@ namespace NumberArtistView.Services
                         Id = entity.id,
                         Name = entity.fileName,
                         ResourceName = entity.storedFileName,
-                        AppUserId = userId
+                        AppUserId = userId,
+                        ReferenceDrawingId = entity.ReferenceDrawingId
                     };
+                    Debug.WriteLine($"DatabaseService: GetDxfFileBytesAsync returning DxfFileEntry Id={fileEntry.Id}");
                     return fileEntry;
                 }
+                Debug.WriteLine("DatabaseService: GetDxfFileBytesAsync entity == null");
                 return null;
             }
+            Debug.WriteLine($"DatabaseService: GetDxfFileBytesAsync response failed {response.StatusCode}");
             return null;
         }
     }

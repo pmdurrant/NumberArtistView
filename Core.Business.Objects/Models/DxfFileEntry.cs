@@ -9,6 +9,8 @@ namespace Core.Business.Objects
         public string Name { get; set; }
         public string ResourceName { get; set; }
         public Guid AppUserId { get; set; }
-    }
 
+        // Use long for SQLite "bigint" compatibility
+        public long ReferenceDrawingId { get; set; }
+    }
 }

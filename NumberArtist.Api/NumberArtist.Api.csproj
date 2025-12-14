@@ -28,6 +28,8 @@
   <ItemGroup>
     <Folder Include="https\" />
     <Folder Include="wwwroot\" />
+    <Folder Include="wwwroot\dxf_files\p.durrant\" />
+    <Folder Include="wwwroot\ref_files\p.durrant\" />
   </ItemGroup>
 
   <ItemGroup>
