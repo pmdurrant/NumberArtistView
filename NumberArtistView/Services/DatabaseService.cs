@@ -2,20 +2,21 @@ using Core.Business.Objects;
 using Core.Business.Objects.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Bson;
+using NumberArtistView.Models;
 using NumberArtistView.Services.Models;
 using SQLite;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Diagnostics;
 
 namespace NumberArtistView.Services
 {
-    public class  DatabaseService
+    public class DatabaseService
     {
         private SQLiteAsyncConnection _database;
-        private  string _filesPathRef;
+        private string _filesPathRef;
         private string dbPath;
 
         public DatabaseService()
@@ -24,14 +25,23 @@ namespace NumberArtistView.Services
             {
                 Debug.WriteLine("DatabaseService: constructor start");
                 dbPath = Constants.DatabasePath;
-                  Debug.WriteLine($"DatabaseService: DB path = {Constants.DatabasePath}");
+                Debug.WriteLine($"DatabaseService: DB path = {Constants.DatabasePath}");
 
-                _database = new SQLiteAsyncConnection(dbPath,Constants.Flags);
+                _database = new SQLiteAsyncConnection(dbPath, Constants.Flags);
                 _database.CreateTableAsync<Core.Business.Objects.DxfFileEntry>().Wait();
                 Debug.WriteLine("DatabaseService: Ensured DxfFileEntry table exists");
 
                 // Ensure ReferenceDrawing table exists
                 _database.CreateTableAsync<ReferenceDrawing>().Wait();
+                
+                // Ensure LayerGroupState table exists
+                _database.CreateTableAsync<LayerGroupState>().Wait();
+                Debug.WriteLine("DatabaseService: Ensured LayerGroupState table exists");
+                
+                // Ensure PolylineState table exists
+                _database.CreateTableAsync<PolylineState>().Wait();
+                Debug.WriteLine("DatabaseService: Ensured PolylineState table exists");
+                
                 _filesPathRef = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files");
 
             }
@@ -51,7 +61,7 @@ namespace NumberArtistView.Services
             Debug.WriteLine("DatabaseService: InitializeAsync completed");
         }
 
-        public async Task<ReferenceDrawing> GetDxfFileBackgroundIdAsyncByDxfFileId (long dxfFileId)
+        public async Task<ReferenceDrawing> GetDxfFileBackgroundIdAsyncByDxfFileId(long dxfFileId)
         {
             Debug.WriteLine($"DatabaseService: GetDxfFileBackgroundIdAsyncByDxfFileId dxfFileId={dxfFileId}");
             var result = await _database.Table<ReferenceDrawing>()
@@ -60,7 +70,7 @@ namespace NumberArtistView.Services
             Debug.WriteLine($"DatabaseService: Found ReferenceDrawing={(result != null ? result.Name : "<null>")}");
             return result;
         }
-         public async Task CopyFilesFromServerToLocalDb()
+        public async Task CopyFilesFromServerToLocalDb()
         {
             Debug.WriteLine("DatabaseService: CopyFilesFromServerToLocalDb start");
             try
@@ -84,7 +94,7 @@ namespace NumberArtistView.Services
                 Debug.WriteLine($"DatabaseService: Using userId {userId}");
 
                 var response = await httpClient.GetAsync("api/DxfFiles/GetFiles");
-                Debug.WriteLine($"DatabaseService: Server responded with status {response.StatusCode}");                if (!response.IsSuccessStatusCode)
+                Debug.WriteLine($"DatabaseService: Server responded with status {response.StatusCode}"); if (!response.IsSuccessStatusCode)
                 {
                     Debug.WriteLine($"DatabaseService: Failed to fetch dxffiles: {response.StatusCode}");
                     return;
@@ -168,7 +178,7 @@ namespace NumberArtistView.Services
                             // If you need to persist the background content, save to file or a dedicated table here.
 
                             MemoryStream ms = new MemoryStream();
-                           await ms.ReadAsync(System.Text.Encoding.UTF8.GetBytes(backgroundString ?? string.Empty));
+                            await ms.ReadAsync(System.Text.Encoding.UTF8.GetBytes(backgroundString ?? string.Empty));
 
                             var outentity = ms.ToArray();
                             if (outentity != null)
@@ -176,7 +186,7 @@ namespace NumberArtistView.Services
                                 _filesPathRef += "\\" + resourceName;
 
                                 File.WriteAllBytes(_filesPathRef, outentity);
-                                Debug.WriteLine($"DatabaseService: Wrote resource to file {_filesPathRef    }");
+                                Debug.WriteLine($"DatabaseService: Wrote resource to file {_filesPathRef}");
                             }
 
 
@@ -188,8 +198,8 @@ namespace NumberArtistView.Services
 
                         var referenceDrawing = new ReferenceDrawing
                         {
-                          
-                         
+
+
                             Name = newFileEntry.Name,
                             DxfFileId = newFileEntry.Id
                         };
@@ -241,7 +251,7 @@ namespace NumberArtistView.Services
         public async Task<int> GetDxfFileIdAsync(string resourceName)
         {
             Debug.WriteLine($"DatabaseService: GetDxfFileIdAsync resourceName={resourceName}");
-            var result= await _database.Table<DxfFileEntry>()
+            var result = await _database.Table<DxfFileEntry>()
                 .Where(f => f.ResourceName == resourceName)
                 .FirstOrDefaultAsync();
 
@@ -322,7 +332,94 @@ namespace NumberArtistView.Services
             Debug.WriteLine($"DatabaseService: GetDxfFileBytesAsync response failed {response.StatusCode}");
             return null;
         }
+
+        // Add these methods to the existing DatabaseService class
+
+        public async Task SaveLayerGroupStateAsync(Guid userId, string dxfFileName, IEnumerable<LayerItem> layers)
+        {
+            await InitializeAsync();
+
+            // Delete existing states for this file
+            await _database.ExecuteAsync(
+                "DELETE FROM LayerGroupStates WHERE UserId = ? AND DxfFileName = ?",
+                userId, dxfFileName);
+
+            // Insert new states
+            var states = layers.Select(layer => new LayerGroupState
+            {
+                UserId = userId,
+                DxfFileName = dxfFileName,
+                LayerName = layer.LayerName,
+                LayerIndex = layer.LayerIndex,
+                IsVisible = layer.IsVisible,
+                ColorR = (int)(layer.color.Red * 255),
+                ColorG = (int)(layer.color.Green * 255),
+                ColorB = (int)(layer.color.Blue * 255),
+                ColorA = (int)(layer.color.Alpha * 255),
+                LastModified = DateTime.UtcNow
+            }).ToList();
+
+            await _database.InsertAllAsync(states);
+        }
+
+        public async Task<List<LayerGroupState>> LoadLayerGroupStateAsync(Guid userId, string dxfFileName)
+        {
+            await InitializeAsync();
+
+            return await _database.Table<LayerGroupState>()
+                .Where(s => s.UserId == userId && s.DxfFileName == dxfFileName)
+                .OrderBy(s => s.LayerIndex)
+                .ToListAsync();
+        }
+
+        public async Task SavePolylineStatesAsync(Guid userId, string dxfFileName, string layerName, IEnumerable<Pline2DModel> polylines)
+        {
+            await InitializeAsync();
+
+            // Delete existing states for this layer
+            await _database.ExecuteAsync(
+                "DELETE FROM PolylineStates WHERE UserId = ? AND DxfFileName = ? AND LayerName = ?",
+                userId, dxfFileName, layerName);
+
+            // Insert new states
+            var states = polylines.Select((pline, index) => new PolylineState
+            {
+                UserId = userId,
+                DxfFileName = dxfFileName,
+                LayerName = layerName,
+                PolylineIndex = index,
+                IsPainted = pline.IsPainted,
+                LastModified = DateTime.UtcNow
+            }).ToList();
+
+            if (states.Any())
+            {
+                await _database.InsertAllAsync(states);
+            }
+        }
+
+        public async Task<List<PolylineState>> LoadPolylineStatesAsync(Guid userId, string dxfFileName, string layerName)
+        {
+            await InitializeAsync();
+
+            return await _database.Table<PolylineState>()
+                .Where(s => s.UserId == userId && s.DxfFileName == dxfFileName && s.LayerName == layerName)
+                .OrderBy(s => s.PolylineIndex)
+                .ToListAsync();
+        }
+
+        public async Task ClearAllStatesAsync(Guid userId, string dxfFileName)
+        {
+            await InitializeAsync();
+
+            await _database.ExecuteAsync(
+                "DELETE FROM LayerGroupStates WHERE UserId = ? AND DxfFileName = ?",
+                userId, dxfFileName);
+
+            await _database.ExecuteAsync(
+                "DELETE FROM PolylineStates WHERE UserId = ? AND DxfFileName = ?",
+                userId, dxfFileName);
+        }
+
     }
-
-
 }

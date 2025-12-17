@@ -1,6 +1,7 @@
 using Core.Business.Objects;
 using Core.Business.Objects.Models;
 using Microsoft.Maui.Controls;
+using Microsoft.Maui.Controls.Xaml;
 using netDxf;
 using Newtonsoft.Json;
 using NumberArtist.View.Views;
@@ -31,10 +32,17 @@ namespace NumberArtistView
 
         // Collection that can be bound to UI: each item contains the Layer name and the list of closed polylines for that layer.
         public ObservableCollection<LayerClosedGroup> VisibleClosedGroups { get; set; } = new ObservableCollection<LayerClosedGroup>();
-         
+
 
         public ObservableCollection<LayerGroup> LayerGroup { get; set; } = new ObservableCollection<LayerGroup>();
         public LayerClosedGroup SelectedClosedGroup { get; set; }
+        private string _currentDxfFileName;
+
+        private double currentScale = 1;
+        private double startScale = 1;
+        private double xOffset;
+        private double yOffset;
+        private Array bytes;
         public MainPage(DatabaseService databaseService)
         {
             InitializeComponent(); // This now correctly loads the UI from MainPage.xaml
@@ -64,6 +72,7 @@ namespace NumberArtistView
             //// Load files into picker on a background thread
             Task.Run(async () => await LoadDxfFilesIntoPicker());
         }
+
         // Rebuilds VisibleClosedGroups from the current polylineDrawable state and VisibleLayers set.
         // Runs updates on the main/UI thread to safely update the ObservableCollection.
         private void UpdateVisibleClosedGroups()
@@ -252,7 +261,6 @@ namespace NumberArtistView
         }
 
 
-      
 
         /// <summary>
         /// Update the ObservableCollection `Vertices` with VertexViewModel entries for the specified layer.
@@ -338,6 +346,8 @@ namespace NumberArtistView
                 await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Invalid resource name.", "OK"));
                 return;
             }
+
+            _currentDxfFileName = resourceName;
 
             var resourceaccess = new ResourceAccess();
 
@@ -431,24 +441,20 @@ namespace NumberArtistView
                     });
                 }
 
-                // Marshal final UI updates to main thread
+                // Restore saved layer states
+                await RestoreLayerStatesAsync(layers2);
+
                 await MainThread.InvokeOnMainThreadAsync(() =>
                 {
-                    // Assign polylines
                     polylineDrawable.Polylines = plines;
-
-                    // Ensure SelectedLayer is never set to null (use empty string when none)
                     polylineDrawable.SelectedLayer = layers2.Any() ? layers2[0].LayerName : string.Empty;
 
-                    // Wire up PropertyChanged handlers and set ItemsSource
                     foreach (var li in layers2)
                     {
                         li.PropertyChanged += LayerItem_PropertyChanged;
                     }
 
                     LayersListView.ItemsSource = layers2;
-
-                    // initialize drawable visible layers from list
                     polylineDrawable.VisibleLayers = layers2.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
 
                     if (layers2.Any())
@@ -460,7 +466,6 @@ namespace NumberArtistView
                         polylineDrawable.SelectedLayer = string.Empty;
                     }
 
-                    // Request redraw on UI thread
                     GraphicsView.Invalidate();
                 });
 
@@ -472,10 +477,8 @@ namespace NumberArtistView
                     DisplayAlert("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK"));
             }
 
-            // Local helper to safely return a Color-like object used in the project (keeps parity with GetColour)
             static Color GetColourSafe(short index)
             {
-                // Reuse existing GetColour logic if available on instance; this static fallback mirrors GetColour behavior.
                 var colourSelectionList = new ColourSelectionList();
                 var fallback = Microsoft.Maui.Graphics.Colors.Black;
                 var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > index)
@@ -493,33 +496,287 @@ namespace NumberArtistView
                 return Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B);
             }
         }
-        // Add this method to handle the ItemTapped event for ClosedGroupsListView
-
-        private void ClosedGroupsListView_ItemSelected(object sender, SelectedItemChangedEventArgs e)
-        {    // Example: Deselect the item after tap (optional)
-            if (sender is ListView listView)
-                listView.SelectedItem = null;
-            var items = (e.SelectedItem as LayerClosedGroup)?.ClosedPlines;
-           if (items == null)
+        // Add this method to save layer states when they change
+        private async Task SaveLayerStatesAsync()
+        {
+            if (_userId == Guid.Empty || string.IsNullOrWhiteSpace(_currentDxfFileName))
                 return;
 
-            foreach (var li in items)
-            {
-                li.PropertyChanged += PlineItem_PropertyChanged;
-            }
+            var layers = LayersListView.ItemsSource as IEnumerable<LayerItem>;
+            if (layers == null || !layers.Any())
+                return;
 
-            SelectedPlinesListView.ItemsSource = items;
-       
-            
-            // TODO: Add your logic for when a closed group is tapped
+            try
+            {
+                await _databaseService.SaveLayerGroupStateAsync(_userId, _currentDxfFileName, layers);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error saving layer states: {ex.Message}");
+            }
         }
 
+        // Add this method to save polyline states when they change
+        private async Task SavePolylineStatesAsync(string layerName, IEnumerable<Pline2DModel> polylines)
+        {
+            if (_userId == Guid.Empty || string.IsNullOrWhiteSpace(_currentDxfFileName) || string.IsNullOrWhiteSpace(layerName))
+                return;
+
+            try
+            {
+                await _databaseService.SavePolylineStatesAsync(_userId, _currentDxfFileName, layerName, polylines);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error saving polyline states: {ex.Message}");
+            }
+        }
+
+        // Add this method to restore layer states
+        private async Task RestoreLayerStatesAsync(List<LayerItem> layers)
+        {
+            if (_userId == Guid.Empty || string.IsNullOrWhiteSpace(_currentDxfFileName) || layers == null || !layers.Any())
+                return;
+
+            try
+            {
+                var savedStates = await _databaseService.LoadLayerGroupStateAsync(_userId, _currentDxfFileName);
+                if (!savedStates.Any())
+                    return;
+
+                var stateDict = savedStates.ToDictionary(s => s.LayerName, s => s);
+
+                foreach (var layer in layers)
+                {
+                    if (stateDict.TryGetValue(layer.LayerName, out var state))
+                    {
+                        layer.IsVisible = state.IsVisible;
+                        layer.color = Color.FromRgba(state.ColorR, state.ColorG, state.ColorB, state.ColorA);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error restoring layer states: {ex.Message}");
+            }
+        }
+
+        // Add this method to restore polyline states
+        private async Task RestorePolylineStatesAsync(string layerName, List<Pline2DModel> polylines)
+        {
+            if (_userId == Guid.Empty || string.IsNullOrWhiteSpace(_currentDxfFileName) || string.IsNullOrWhiteSpace(layerName) || polylines == null || !polylines.Any())
+                return;
+
+            try
+            {
+                var savedStates = await _databaseService.LoadPolylineStatesAsync(_userId, _currentDxfFileName, layerName);
+                if (!savedStates.Any())
+                    return;
+
+                for (int i = 0; i < Math.Min(polylines.Count, savedStates.Count); i++)
+                {
+                    polylines[i].IsPainted = savedStates[i].IsPainted;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error restoring polyline states: {ex.Message}");
+            }
+        }
+
+        // Modify LayerItem_PropertyChanged to save state when visibility changes
+        private void LayerItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(LayerItem.IsVisible))
+            {
+                var items = LayersListView.ItemsSource as IEnumerable<LayerItem>;
+                if (items != null)
+                {
+                    polylineDrawable.VisibleLayers = items.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+
+                    // Update grouped visible closed polylines
+                    UpdateVisibleClosedGroups();
+
+                    GraphicsView.Invalidate();
+
+                    // Save state to database
+                    _ = SaveLayerStatesAsync();
+                }
+            }
+
+            if (e.PropertyName == nameof(LayerItem.IsVisible))
+            {
+                GraphicsView.Invalidate();
+            }
+        }
+
+
+
+        // common handler that updates drawable visible set when a layer's IsVisible changes
+        private void PlineItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(Pline2DModel.IsPainted))
+            {
+                // Clear the list to prevent stale data from persisting
+                SelectedPlinesListView.ItemsSource = null;
+                GraphicsView.Invalidate();
+                var items = SelectedPlinesListView.ItemsSource as IEnumerable<Pline2DModel>;
+                if (items != null)
+                {
+                    GraphicsView.Invalidate();
+
+                    // Save polyline states
+                    if (sender is Pline2DModel pline && !string.IsNullOrWhiteSpace(pline.Layer))
+                    {
+                        _ = SavePolylineStatesAsync(pline.Layer, items);
+                    }
+                }
+            }
+
+            if (e.PropertyName == nameof(Pline2DModel.IsPainted))
+            {
+                GraphicsView.Invalidate();
+            }
+        }
+
+        private void AllLayersCheckBox_CheckedChanged(object sender, CheckedChangedEventArgs e)
+        {
+            LoadList(e.Value);
+
+        }
+
+        private void LoadList(bool IsVisible)
+        {
+            var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
+            var layers2 = new List<LayerItem>();
+
+            var colourSelectionList = new ColourSelectionList();
+            // Ensure there's at least a fallback color (black) if selection is empty
+            var fallback = Microsoft.Maui.Graphics.Colors.Black;
+
+            for (int i = 0; i < layers.Count; i++)
+            {
+                var layerName = layers[i];
+
+                // Determine colour by ordinal position (index)
+                var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > i)
+                    ? colourSelectionList.Selection[i]
+                    : fallback;
+
+                // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
+                var layerColourObj = new NumberArtistView.Models.LayerColorObject
+                {
+                    R = (int)(selectedColor.Red * 255),
+                    G = (int)(selectedColor.Green * 255),
+                    B = (int)(selectedColor.Blue * 255),
+                    A = (int)(selectedColor.Alpha * 255)
+                };
+
+                layers2.Add(new LayerItem
+                {
+                    color = Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B),
+                    LayerIndex = i + 1,
+                    LayerName = layerName,
+                    IsVisible = IsVisible
+                });
+            }
+
+            // Wire up property changed so toggling boxes updates drawable and view
+            foreach (var li in layers2)
+            {
+                li.PropertyChanged += LayerItem_PropertyChanged;
+            }
+
+            LayersListView.ItemsSource = layers2;
+        }
+        // Add this method to handle the ItemSelected event for LayersListView
+        private void LayerPicker_ItemSelected(object sender, SelectedItemChangedEventArgs e)
+        {
+            if (e.SelectedItem is LayerItem selectedLayer)
+            {
+                polylineDrawable.SelectedLayer = selectedLayer.LayerName ?? string.Empty;
+                _ = UpdateVerticesForSelectedLayer(polylineDrawable.SelectedLayer);
+                GraphicsView.Invalidate();
+            }
+        }
         // Add this method to fix XC0002
-        private double currentScale = 1;
-        private double startScale = 1;
-        private double xOffset;
-        private double yOffset;
-        private Array bytes;
+        private void DxfFilePicker_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            // TODO: Add your logic for when the selected index changes
+
+
+            if (DxfFilePicker.SelectedItem is DxfFileEntry selectedDxfFile)
+            {
+                // Load the DXF data for the selected file
+                _ = LoadDxfData(selectedDxfFile.ResourceName);
+                // Load the background resource data
+                _ = LoadBackgroundResourceData(selectedDxfFile);
+            }
+        }
+
+
+        private async void SelectDxfButton_Clicked(object sender, EventArgs e)
+        {
+            try
+            {
+                var customFileType = new FilePickerFileType(
+                    new Dictionary<DevicePlatform, IEnumerable<string>>
+                    {
+                        { DevicePlatform.iOS, new[] { "com.autodesk.dxf" } }, // UTType for DXF
+                        { DevicePlatform.Android, new[] { "application/dxf" } }, // MIME type
+                        { DevicePlatform.WinUI, new[] { ".dxf" } }, // file extension
+                        { DevicePlatform.Tizen, new[] { "*/*" } },
+                        { DevicePlatform.macOS, new[] { "dxf" } }, // UTType
+                    });
+
+                var pickOptions = new PickOptions
+                {
+                    PickerTitle = "Please select a DXF file",
+                    FileTypes = customFileType,
+                };
+
+                var result = await FilePicker.PickAsync(pickOptions);
+
+                if (result != null)
+                {
+                    using (var stream = await result.OpenReadAsync())
+                    {
+                        DxfDocument loaded = DxfDocument.Load(stream);
+                        //  ProcessDxfDocument(loaded);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                await DisplayAlert("Error", $"An error occurred while selecting the DXF file: {ex.Message}", "OK");
+            }
+        }
+        private void SwipeGestureRecognizer_Swiped(object sender, SwipedEventArgs e)
+        {
+
+            Color chColor = null;
+
+
+            var box = (BoxView)sender;
+
+            switch (e.Direction)
+            {
+                case SwipeDirection.Right:
+                    chColor = Colors.Red;
+                    break;
+            }
+
+        }
+
+        private void PanGestureRecognizer_PanUpdated(object sender, PanUpdatedEventArgs e)
+        {
+            if (e.StatusType == GestureStatus.Running)
+            {
+                // Update the position of the content based on the pan gesture
+                Content.TranslationX += e.TotalX;
+                Content.TranslationY += e.TotalY;
+            }
+        }
 
         private void PinchGestureRecognizer_PinchUpdated(object sender, PinchGestureUpdatedEventArgs e)
         {
@@ -572,48 +829,22 @@ namespace NumberArtistView
             }
         }
 
-        private void ColorBox_Tapped(object sender, TappedEventArgs e)
+        private void ClosedGroupsListView_ItemSelected(object sender, SelectedItemChangedEventArgs e)
         {
-            // Event handling logic goes here
-        }
-
-        // Make event handler async so we can await database calls instead of blocking
-        private async void DxfFilePicker_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (DxfFilePicker.SelectedItem is DxfFileEntry selectedFile)
+            var groupsListView = sender as ListView;
+            if (groupsListView?.SelectedItem is LayerClosedGroup selectedGroup)
             {
-                _ = LoadDxfData(selectedFile.ResourceName);
-
-                // Use the injected database service and ensure it's initialized
-                await _databaseService.InitializeAsync();
-
-                var dxffile = await _databaseService.GetDxfFileByNameAsync(selectedFile.ResourceName);
-                if (dxffile != null)
+                
+                SelectedPlinesListView.ItemsSource = selectedGroup.ClosedPlines;
+                // Wire up property changed for each polyline to track IsPainted changes
+                foreach (var pline in selectedGroup.ClosedPlines)
                 {
-                    await LoadBackgroundResourceData(dxffile);
+                    pline.PropertyChanged += PlineItem_PropertyChanged;
                 }
-
-                GraphicsView.Invalidate(); // Redraw the view
             }
         }
 
-        private void LayerPicker_ItemSelected(object? sender, SelectedItemChangedEventArgs e)
-        {
-            if (e.SelectedItem is LayerItem selectedLayer)
-            {
-                polylineDrawable.SelectedLayer = selectedLayer.LayerName;
-                _ = UpdateVerticesForSelectedLayer(selectedLayer.LayerName); // fire-and-forget is fine; UI update runs on MainThread
-               GraphicsView.Invalidate(); // Redraw the view
-            }
-            else if (e.SelectedItem is string selectedLayerName) // Fallback for old behavior
-            {
-                polylineDrawable.SelectedLayer = selectedLayerName;
-                _ = UpdateVerticesForSelectedLayer(selectedLayerName);
-                GraphicsView.Invalidate(); // Redraw the view
-            }
-        }
-
-        private async void LogoutButton_Clicked(object sender, EventArgs e)
+        private void LogoutButton_Clicked(object sender, EventArgs e)
         {
             // Clear user session data
             Preferences.Clear("UserId");
@@ -621,163 +852,6 @@ namespace NumberArtistView
             // Navigate back to the LoginPage by setting it as the new MainPage
             Application.Current.MainPage = new LoginPage();
         }
-
-        private async void SelectDxfButton_Clicked(object sender, EventArgs e)
-        {
-            try
-            {
-                var customFileType = new FilePickerFileType(
-                    new Dictionary<DevicePlatform, IEnumerable<string>>
-                    {
-                        { DevicePlatform.iOS, new[] { "com.autodesk.dxf" } }, // UTType for DXF
-                        { DevicePlatform.Android, new[] { "application/dxf" } }, // MIME type
-                        { DevicePlatform.WinUI, new[] { ".dxf" } }, // file extension
-                        { DevicePlatform.Tizen, new[] { "*/*" } },
-                        { DevicePlatform.macOS, new[] { "dxf" } }, // UTType
-                    });
-
-                var pickOptions = new PickOptions
-                {
-                    PickerTitle = "Please select a DXF file",
-                    FileTypes = customFileType,
-                };
-
-                var result = await FilePicker.PickAsync(pickOptions);
-
-                if (result != null)
-                {
-                    using (var stream = await result.OpenReadAsync())
-                    {
-                        DxfDocument loaded = DxfDocument.Load(stream);
-                        //  ProcessDxfDocument(loaded);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                await DisplayAlert("Error", $"An error occurred while selecting the DXF file: {ex.Message}", "OK");
-            }
-        }
-
-        private void SwipeGestureRecognizer_Swiped(object sender, SwipedEventArgs e)
-        {
-
-            Color chColor = null;
-
-
-            var box = (BoxView)sender;
-
-            switch (e.Direction)
-            { case SwipeDirection.Right:
-                    chColor = Colors.Red;
-                    break;
-            }
-
-        }
-
-        private void PanGestureRecognizer_PanUpdated(object sender, PanUpdatedEventArgs e)
-        {
-
-        }
-
-        // common handler that updates drawable visible set when a layer's IsVisible changes
-        private void LayerItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-        {
-            if (e.PropertyName == nameof(LayerItem.IsVisible))
-            {
-                var items = LayersListView.ItemsSource as IEnumerable<LayerItem>;
-                if (items != null)
-                {
-                    polylineDrawable.VisibleLayers = items.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
-
-                    // Update grouped visible closed polylines
-                    UpdateVisibleClosedGroups();
-
-                    GraphicsView.Invalidate();
-                }
-            }
-
-            if (e.PropertyName == nameof(LayerItem.IsVisible))
-            {
-                GraphicsView.Invalidate();
-            }
-        }
-
-
-
-        // common handler that updates drawable visible set when a layer's IsVisible changes
-        private void PlineItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-        {
-            if (e.PropertyName == nameof(Pline2DModel.IsPainted))
-            {
-                var items = SelectedPlinesListView.ItemsSource as IEnumerable<Pline2DModel>;
-             if (items != null)
-                {
-                //    polylineDrawable.VisibleLayers = items.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
-
-                //    // Update grouped visible closed polylines
-                //    UpdateVisibleClosedGroups();
-
-                    GraphicsView.Invalidate();
-                }
-            }
-
-            if (e.PropertyName == nameof(Pline2DModel.IsPainted))
-            {
-                GraphicsView.Invalidate();
-            }
-        }
-        private void AllLayersCheckBox_CheckedChanged(object sender, CheckedChangedEventArgs e)
-        {
-            LoadList(e.Value);
-
-        }
-
-        private void LoadList(bool IsVisible)
-        {
-            var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
-            var layers2 = new List<LayerItem>();
-
-            var colourSelectionList = new ColourSelectionList();
-            // Ensure there's at least a fallback color (black) if selection is empty
-            var fallback = Microsoft.Maui.Graphics.Colors.Black;
-
-            for (int i = 0; i < layers.Count; i++)
-            {
-                var layerName = layers[i];
-
-                // Determine colour by ordinal position (index)
-                var selectedColor = (colourSelectionList.Selection != null && colourSelectionList.Selection.Count > i)
-                    ? colourSelectionList.Selection[i]
-                    : fallback;
-
-                // Convert MAUI Color (0..1) to 0..255 ints for LayerColorObject
-                var layerColourObj = new NumberArtistView.Models.LayerColorObject
-                {
-                    R = (int)(selectedColor.Red * 255),
-                    G = (int)(selectedColor.Green * 255),
-                    B = (int)(selectedColor.Blue * 255),
-                    A = (int)(selectedColor.Alpha * 255)
-                };
-
-                layers2.Add(new LayerItem
-                {
-                    color = Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B),
-                    LayerIndex = i + 1,
-                    LayerName = layerName,
-                    IsVisible = IsVisible
-                });
-            }
-
-            // Wire up property changed so toggling boxes updates drawable and view
-            foreach (var li in layers2)
-            {
-                li.PropertyChanged += LayerItem_PropertyChanged;
-            }
-
-            LayersListView.ItemsSource = layers2;
-        }
-
         //private async void DiagnoticsButton_Clicked(object sender, EventArgs e)
         //{
 
@@ -800,6 +874,25 @@ namespace NumberArtistView
         //        });
         //    }
         //}
+
+        private async void PlinePainted_CheckedChanged(object sender, CheckedChangedEventArgs e)
+        {
+            if (sender is CheckBox checkBox && checkBox.BindingContext is Pline2DModel pline)
+            {
+                // The IsPainted property should already be updated via binding
+                // Now save the state to the database
+                if (!string.IsNullOrWhiteSpace(pline.Layer))
+                {
+                    var items = SelectedPlinesListView.ItemsSource as IEnumerable<Pline2DModel>;
+                    if (items != null && items.Any())
+                    {
+                        await SavePolylineStatesAsync(pline.Layer, items);
+                        GraphicsView.Invalidate();
+                    }
+                }
+            }
+        }
+
     }
 
 
