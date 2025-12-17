@@ -5,7 +5,9 @@ using netDxf;
 using Newtonsoft.Json;
 using NumberArtist.View.Views;
 using NumberArtistView.Models;
+using NumberArtistView.NumberArtist.View.ViewModels;
 using NumberArtistView.Services;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Data.Common;
 using System.Diagnostics;
@@ -24,13 +26,21 @@ namespace NumberArtistView
         private readonly Guid _userId;
         public ImageSource? BackgroundImage { get; set; }
 
+        // Add the Vertices property as an ObservableCollection
+        public ObservableCollection<Pline2DModel> Shapes { get; set; } = new ObservableCollection<Pline2DModel>();
 
+        // Collection that can be bound to UI: each item contains the Layer name and the list of closed polylines for that layer.
+        public ObservableCollection<LayerClosedGroup> VisibleClosedGroups { get; set; } = new ObservableCollection<LayerClosedGroup>();
+         
+
+        public ObservableCollection<LayerGroup> LayerGroup { get; set; } = new ObservableCollection<LayerGroup>();
+        public LayerClosedGroup SelectedClosedGroup { get; set; }
         public MainPage(DatabaseService databaseService)
         {
             InitializeComponent(); // This now correctly loads the UI from MainPage.xaml
             ResourceAccess ra = new ResourceAccess();
             BindingContext = this;
-           
+
             OnPropertyChanged(nameof(BackgroundImage));
             _databaseService = databaseService;
 
@@ -54,6 +64,49 @@ namespace NumberArtistView
             //// Load files into picker on a background thread
             Task.Run(async () => await LoadDxfFilesIntoPicker());
         }
+        // Rebuilds VisibleClosedGroups from the current polylineDrawable state and VisibleLayers set.
+        // Runs updates on the main/UI thread to safely update the ObservableCollection.
+        private void UpdateVisibleClosedGroups()
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                VisibleClosedGroups.Clear();
+
+                if (polylineDrawable == null || polylineDrawable.Polylines == null || !polylineDrawable.Polylines.Any())
+                {
+                    // Ensure the ClosedGroupsListView is bound (empty) so the view shows nothing instead of stale data.
+                    ClosedGroupsListView.ItemsSource = VisibleClosedGroups;
+                    OnPropertyChanged(nameof(VisibleClosedGroups));
+                    return;
+                }
+
+                var visibleSet = polylineDrawable.VisibleLayers;
+
+                var groups = polylineDrawable.Polylines
+                    .Where(p => p != null && p.IsClosed && (visibleSet == null || visibleSet.Contains(p.Layer)))
+                    .GroupBy(p => p.Layer ?? string.Empty)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal);
+
+                foreach (var g in groups)
+                {
+                    var list = g.ToList();
+
+                    VisibleClosedGroups.Add(new LayerClosedGroup
+                    {
+                        LayerName = g.Key,
+                        ClosedPlines = list,
+                        ClosedPlinesCount = list.Count
+                    });
+                }
+
+                // Bind the ClosedGroupsListView to the VisibleClosedGroups collection so the view shows the groups.
+                ClosedGroupsListView.ItemsSource = VisibleClosedGroups;
+
+                OnPropertyChanged(nameof(VisibleClosedGroups));
+            });
+        }
+
+
 
         protected override async void OnAppearing()
         {
@@ -142,10 +195,7 @@ namespace NumberArtistView
                     {
                         IsClosed = pline.IsClosed,
                         Layer = pline.Layer.Name,
-                      
-                        LayerColour = new NumberArtistView.Models.LayerColorObject() { R = 255, G = 0, B = 0 }, // You might want to set actual color values here
-                      
-                        
+                        LayerColour = new NumberArtistView.Models.LayerColorObject() { R = 255, G = 0, B = 0 },
                         Vertices = pline.Vertexes.Select(v => new VertexModel
                         {
                             X = v.Position.X,
@@ -153,6 +203,9 @@ namespace NumberArtistView
                             Bulge = v.Bulge
                         }).ToList()
                     }).ToList();
+
+
+
 
                     var layers = polylineDrawable.Layers.OrderBy(l => l).ToList();
                     var layers2 = layers.Select((ln, idx) => new LayerItem
@@ -171,14 +224,18 @@ namespace NumberArtistView
                     if (layers2.Any())
                     {
                         LayersListView.SelectedItem = layers2[0];
+                        polylineDrawable.SelectedLayer = layers2[0].LayerName ?? string.Empty;
                     }
                     else
                     {
-                        polylineDrawable.SelectedLayer = null;
+                        polylineDrawable.SelectedLayer = string.Empty;
                     }
 
                     // initialize drawable visible layers from list
                     polylineDrawable.VisibleLayers = layers2.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+
+                    // Populate the Vertices collection for the selected layer
+                    await UpdateVerticesForSelectedLayer(polylineDrawable.SelectedLayer);
 
                     GraphicsView.Invalidate();
                 }
@@ -190,47 +247,81 @@ namespace NumberArtistView
                     DisplayAlert("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK");
                 });
             }
+
+            UpdateVisibleClosedGroups();
         }
+
+
+      
+
+        /// <summary>
+        /// Update the ObservableCollection `Vertices` with VertexViewModel entries for the specified layer.
+        /// If layerName is null/empty, the collection will be cleared.
+        /// This method marshals updates to the UI thread.
+        /// </summary>
+        private async Task UpdateVerticesForSelectedLayer(string? layerName)
+        {
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                Shapes.Clear();
+
+                if (string.IsNullOrWhiteSpace(layerName) || polylineDrawable?.Polylines == null)
+                {
+                    // Do not change ClosedGroupsListView.ItemsSource here; leave it bound to VisibleClosedGroups.
+                    return;
+                }
+
+                // Find polylines that belong to the selected layer (case sensitive match as existing code)
+                var matchedPlines = polylineDrawable.Polylines
+                    .Where(p => string.Equals(p.Layer, layerName, StringComparison.Ordinal))
+                    .ToList();
+
+                foreach (var pline in matchedPlines)
+                {
+                    Shapes.Add(pline);
+                }
+
+                // Keep Shapes updated for other UI bindings. ClosedGroupsListView remains bound to VisibleClosedGroups.
+            });
+        }
+
         // Changed to return Task so callers can await and avoid blocking UI thread
         private async Task LoadBackgroundResourceData(DxfFileEntry dxfFile)
         {
-
             if (dxfFile == null)
             {
                 await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Invalid resource Id.", "OK"));
                 return;
             }
 
-            ResourceAccess resourceaccess = new ResourceAccess();
+            var resourceaccess = new ResourceAccess();
 
-
-            var backgroundFile = await resourceaccess.GetBackgroundResourceAsync(dxfFile.ReferenceDrawingId);
-            //hhhh
-            //
-            if (string.IsNullOrEmpty(backgroundFile))
+            // Get raw image bytes (preferred over string/base64)
+            var bytes = await resourceaccess.GetReferenceImageBytesAsync(dxfFile.ReferenceDrawingId);
+            if (bytes == null || bytes.Length == 0)
             {
-                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Failed to load background resource.", "OK"));
+                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Failed to load background resource bytes.", "OK"));
                 return;
             }
-            if(backgroundFile != null)
-            { 
-           
-}
-         
 
+            // Make a defensive copy that the FromStream delegate can use later (fresh MemoryStream each call)
+            var bytesCopy = new byte[bytes.Length];
+            Array.Copy(bytes, bytesCopy, bytes.Length);
 
-            byte[] array = Encoding.ASCII.GetBytes(backgroundFile);
-
-            using (var stream = new MemoryStream(array))
+            await MainThread.InvokeOnMainThreadAsync(() =>
             {
-                // Load the background image from the stream
-                BackgroundImage = ImageSource.FromStream(() => stream);
-         
-              
-                // ImageBrush is not accessible; set background color as a fallback
-                GraphicsView.BackgroundColor = Colors.Transparent;
-                // If you want to display the image, use an Image control in your layout.
-            }
+                // ImageSource.FromStream requires the delegate to return a new, valid stream each time.
+                BackgroundImage = ImageSource.FromStream(() => new MemoryStream(bytesCopy));
+
+                // Notify bindings that BackgroundImage changed
+                OnPropertyChanged(nameof(BackgroundImage));
+
+                // Ensure GraphicsView remains transparent so the background image shows
+                GraphicsView.BackgroundColor = Microsoft.Maui.Graphics.Colors.Transparent;
+
+                // Request a redraw
+                GraphicsView.Invalidate();
+            });
         }
         // Plan / Pseudocode (detailed):
         // 1. Validate input 'resourceName' and request bytes from ResourceAccess.
@@ -372,6 +463,8 @@ namespace NumberArtistView
                     // Request redraw on UI thread
                     GraphicsView.Invalidate();
                 });
+
+                UpdateVisibleClosedGroups();
             }
             catch (Exception ex)
             {
@@ -400,11 +493,33 @@ namespace NumberArtistView
                 return Color.FromRgb(layerColourObj.R, layerColourObj.G, layerColourObj.B);
             }
         }
+        // Add this method to handle the ItemTapped event for ClosedGroupsListView
+
+        private void ClosedGroupsListView_ItemSelected(object sender, SelectedItemChangedEventArgs e)
+        {    // Example: Deselect the item after tap (optional)
+            if (sender is ListView listView)
+                listView.SelectedItem = null;
+            var items = (e.SelectedItem as LayerClosedGroup)?.ClosedPlines;
+           if (items == null)
+                return;
+
+            foreach (var li in items)
+            {
+                li.PropertyChanged += PlineItem_PropertyChanged;
+            }
+
+            SelectedPlinesListView.ItemsSource = items;
+       
+            
+            // TODO: Add your logic for when a closed group is tapped
+        }
+
         // Add this method to fix XC0002
         private double currentScale = 1;
         private double startScale = 1;
         private double xOffset;
         private double yOffset;
+        private Array bytes;
 
         private void PinchGestureRecognizer_PinchUpdated(object sender, PinchGestureUpdatedEventArgs e)
         {
@@ -456,7 +571,7 @@ namespace NumberArtistView
                 yOffset = Content.TranslationY;
             }
         }
-        
+
         private void ColorBox_Tapped(object sender, TappedEventArgs e)
         {
             // Event handling logic goes here
@@ -487,11 +602,13 @@ namespace NumberArtistView
             if (e.SelectedItem is LayerItem selectedLayer)
             {
                 polylineDrawable.SelectedLayer = selectedLayer.LayerName;
-                GraphicsView.Invalidate(); // Redraw the view
+                _ = UpdateVerticesForSelectedLayer(selectedLayer.LayerName); // fire-and-forget is fine; UI update runs on MainThread
+               GraphicsView.Invalidate(); // Redraw the view
             }
             else if (e.SelectedItem is string selectedLayerName) // Fallback for old behavior
             {
                 polylineDrawable.SelectedLayer = selectedLayerName;
+                _ = UpdateVerticesForSelectedLayer(selectedLayerName);
                 GraphicsView.Invalidate(); // Redraw the view
             }
         }
@@ -546,11 +663,11 @@ namespace NumberArtistView
         {
 
             Color chColor = null;
-            
-            
+
+
             var box = (BoxView)sender;
-               
-                switch (e.Direction)
+
+            switch (e.Direction)
             { case SwipeDirection.Right:
                     chColor = Colors.Red;
                     break;
@@ -572,15 +689,48 @@ namespace NumberArtistView
                 if (items != null)
                 {
                     polylineDrawable.VisibleLayers = items.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+
+                    // Update grouped visible closed polylines
+                    UpdateVisibleClosedGroups();
+
                     GraphicsView.Invalidate();
                 }
             }
+
+            if (e.PropertyName == nameof(LayerItem.IsVisible))
+            {
+                GraphicsView.Invalidate();
+            }
         }
-      
+
+
+
+        // common handler that updates drawable visible set when a layer's IsVisible changes
+        private void PlineItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(Pline2DModel.IsPainted))
+            {
+                var items = SelectedPlinesListView.ItemsSource as IEnumerable<Pline2DModel>;
+             if (items != null)
+                {
+                //    polylineDrawable.VisibleLayers = items.Where(x => x.IsVisible).Select(x => x.LayerName).ToHashSet();
+
+                //    // Update grouped visible closed polylines
+                //    UpdateVisibleClosedGroups();
+
+                    GraphicsView.Invalidate();
+                }
+            }
+
+            if (e.PropertyName == nameof(Pline2DModel.IsPainted))
+            {
+                GraphicsView.Invalidate();
+            }
+        }
         private void AllLayersCheckBox_CheckedChanged(object sender, CheckedChangedEventArgs e)
         {
-            LoadList( e.Value);
-             
+            LoadList(e.Value);
+
         }
 
         private void LoadList(bool IsVisible)
@@ -628,27 +778,29 @@ namespace NumberArtistView
             LayersListView.ItemsSource = layers2;
         }
 
-        private async void DiagnoticsButton_Clicked(object sender, EventArgs e)
-        {
+        //private async void DiagnoticsButton_Clicked(object sender, EventArgs e)
+        //{
 
-            try
-            {
-                var ra = new ResourceAccess();
-                await ra.DiagnoseReferenceDrawingLookupAsync(1037929613);
-                await MainThread.InvokeOnMainThreadAsync(() =>
-                {
-                    // Optional UI feedback that the diagnostic ran.
-                    DisplayAlert("Diagnostics", "DiagnoseReferenceDrawingLookupAsync completed. See Debug output.", "OK");
-                });
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Diagnostics button error: {ex.Message}");
-                await MainThread.InvokeOnMainThreadAsync(() =>
-                {
-                    DisplayAlert("Error", $"Diagnostics failed: {ex.Message}", "OK");
-                });
-            }
-        }
+        //    try
+        //    {
+        //        var ra = new ResourceAccess();
+        //        await ra.DiagnoseReferenceDrawingLookupAsync(1037929613);
+        //        await MainThread.InvokeOnMainThreadAsync(() =>
+        //        {
+        //            // Optional UI feedback that the diagnostic ran.
+        //            DisplayAlert("Diagnostics", "DiagnoseReferenceDrawingLookupAsync completed. See Debug output.", "OK");
+        //        });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Debug.WriteLine($"Diagnostics button error: {ex.Message}");
+        //        await MainThread.InvokeOnMainThreadAsync(() =>
+        //        {
+        //            DisplayAlert("Error", $"Diagnostics failed: {ex.Message}", "OK");
+        //        });
+        //    }
+        //}
     }
+
+
 }

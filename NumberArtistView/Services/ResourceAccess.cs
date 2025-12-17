@@ -197,13 +197,13 @@ namespace NumberArtistView.Services
 
                     //?resourceName={Uri.EscapeDataString(filename)}
 
-              
+
                     var response = await _httpClient.GetAsync($"api/Dxffiles/GetDxfReferenceDrawingByReferenceId/{ReferencefileId}");
 
 
-          
+
                     response.EnsureSuccessStatusCode();
-                  
+
 
                     var content = await response.Content.ReadAsStringAsync();
                     var refdrawing = Newtonsoft.Json.JsonConvert.DeserializeObject<ReferenceDrawing>(content);
@@ -218,7 +218,7 @@ namespace NumberArtistView.Services
                     if (dxfReferenceEntry != null)
                     {
                         // Cache the result in the local database
-                    
+
                         await _database.InsertOrReplaceAsync(dxfReferenceEntry);
 
 
@@ -236,13 +236,13 @@ namespace NumberArtistView.Services
                         // Fetch the DXF resource content and write to ref_files
                         //error looping   var resourceContent = await GetBackgroundResourceAsync(dxfReferenceEntry.Id);
                         Console.WriteLine("dxfReferenceEntry.Name" + dxfReferenceEntry.Name);
-                       // Console.WriteLine("resourceContent" + resourceContent);
+                        // Console.WriteLine("resourceContent" + resourceContent);
                         if (contentBackground != null)
                         {
                             var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", dxfReferenceEntry.Name.ToString());
                             Directory.CreateDirectory(refDir);
                             var targetFileRef = Path.Combine(refDir, dxfReferenceEntry.Name);
-                          await File.WriteAllBytesAsync(targetFileRef, contentBackground ?? Array.Empty<byte>());
+                            await File.WriteAllBytesAsync(targetFileRef, contentBackground ?? Array.Empty<byte>());
                             return "done";
                         }
                     }
@@ -255,7 +255,7 @@ namespace NumberArtistView.Services
                 catch (Exception ex)
                 {
                     Console.WriteLine($"An unexpected error occurred: {ex.Message}");
-                        return null;
+                    return null;
                 }
                 return null;
             }
@@ -533,6 +533,91 @@ namespace NumberArtistView.Services
             catch (Exception ex)
             {
                 Debug.WriteLine($"Diagnose: sample dump threw: {ex.Message}");
+            }
+        }
+    
+    // Add this helper method to ResourceAccess to return the raw image bytes for a reference drawing.
+// Place it anywhere inside the ResourceAccess class (e.g. near other GetBackground* methods).
+public async Task<byte[]?> GetReferenceImageBytesAsync(long referenceFileId)
+        {
+            if (referenceFileId <= 0)
+                return null;
+
+            try
+            {
+                // Try to resolve a local cached file path if ReferenceDrawing exists in the DB
+                ReferenceDrawing? dxfReferenceEntry = null;
+                try
+                {
+                    if (referenceFileId <= int.MaxValue)
+                        dxfReferenceEntry = await _database.FindAsync<ReferenceDrawing>((int)referenceFileId);
+                }
+                catch
+                {
+                    dxfReferenceEntry = null;
+                }
+
+                string? targetFile = null;
+                if (dxfReferenceEntry != null)
+                {
+                    var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", dxfReferenceEntry.Name ?? referenceFileId.ToString());
+                    Directory.CreateDirectory(refDir);
+                    // Use StoredFileName if available otherwise fall back to Name
+                    var fileName = !string.IsNullOrEmpty(dxfReferenceEntry.StoredFileName) ? dxfReferenceEntry.StoredFileName : dxfReferenceEntry.Name;
+                    targetFile = Path.Combine(refDir, fileName ?? referenceFileId.ToString());
+
+                    if (File.Exists(targetFile))
+                    {
+                        try
+                        {
+                            return await File.ReadAllBytesAsync(targetFile);
+                        }
+                        catch
+                        {
+                            // if reading fails, fall through to re-download
+                        }
+                    }
+                }
+
+                // Fetch from server endpoint that returns image bytes
+                var response = await _httpClient.GetAsync($"api/Dxffiles/GetReferenceImage/{referenceFileId}");
+                response.EnsureSuccessStatusCode();
+
+                var contentBytes = await response.Content.ReadAsByteArrayAsync();
+                if (contentBytes != null && contentBytes.Length > 0)
+                {
+                    // If we have a target path, write it for caching
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(targetFile))
+                        {
+                            // Ensure directory exists
+                            var directory = Path.GetDirectoryName(targetFile);
+                            if (!string.IsNullOrEmpty(directory))
+                                Directory.CreateDirectory(directory);
+
+                            await File.WriteAllBytesAsync(targetFile, contentBytes);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore cache write errors
+                    }
+
+                    return contentBytes;
+                }
+
+                return null;
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"Error fetching reference image: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Unexpected error fetching reference image: {ex.Message}");
+                return null;
             }
         }
     }

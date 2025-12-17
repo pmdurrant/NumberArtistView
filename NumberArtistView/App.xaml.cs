@@ -22,9 +22,9 @@ namespace NumberArtistView
                 var appWindow = nativeWindow.AppWindow;
                 if (appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
                 {
-                    presenter.IsMaximizable = false;
-                    presenter.IsMinimizable = false;
-                    presenter.IsResizable = false;
+                    presenter.IsMaximizable = true;
+                    presenter.IsMinimizable = true;
+                    presenter.IsResizable = true;
                 }
 #endif
             };
