@@ -829,18 +829,25 @@ namespace NumberArtistView
             }
         }
 
-        private void ClosedGroupsListView_ItemSelected(object sender, SelectedItemChangedEventArgs e)
+        private async void ClosedGroupsListView_ItemSelected(object sender, SelectedItemChangedEventArgs e)
         {
             var groupsListView = sender as ListView;
             if (groupsListView?.SelectedItem is LayerClosedGroup selectedGroup)
             {
+                // Restore polyline states before binding
+                await RestorePolylineStatesAsync(selectedGroup.LayerName, selectedGroup.ClosedPlines);
                 
                 SelectedPlinesListView.ItemsSource = selectedGroup.ClosedPlines;
+                
                 // Wire up property changed for each polyline to track IsPainted changes
                 foreach (var pline in selectedGroup.ClosedPlines)
                 {
+                    pline.PropertyChanged -= PlineItem_PropertyChanged; // Remove first to avoid duplicates
                     pline.PropertyChanged += PlineItem_PropertyChanged;
                 }
+                
+                // Force the ListView to refresh
+                SelectedPlinesListView.SelectedItem = null;
             }
         }
 
@@ -893,6 +900,7 @@ namespace NumberArtistView
             }
         }
 
+   
     }
 
 
