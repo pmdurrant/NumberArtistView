@@ -48,7 +48,7 @@ builder.Services.AddIdentity<AppUser, IdentityRole>()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "NumberArtist.Api", Version = "v1" });
+    c.SwaggerDoc("v1", new Microsoft.OpenApi.OpenApiInfo { Title = "NumberArtist.Api", Version = "v1" });
 
     // Define the BearerAuth scheme
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.OpenApiSecurityScheme
