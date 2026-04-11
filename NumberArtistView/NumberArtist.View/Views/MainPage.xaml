@@ -91,38 +91,36 @@ END PSEUDOCODE
             </Grid>
 
             <!-- Scrollable Layers ListView without header -->
-            <ListView x:Name="LayersListView"
-                      Grid.Row="2"
-                      HasUnevenRows="True"
-                      BackgroundColor="Transparent">
-                <ListView.ItemTemplate>
+            <CollectionView x:Name="LayersListView"
+                            Grid.Row="2"
+                            SelectionMode="None"
+                            BackgroundColor="Transparent">
+                <CollectionView.ItemTemplate>
                     <DataTemplate>
-                        <ViewCell>
-                            <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
-                                <!-- New checkbox bound to IsVisible -->
-                                <CheckBox IsChecked="{Binding IsVisible}" VerticalOptions="Center" Grid.Column="0" />
+                        <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
+                            <!-- New checkbox bound to IsVisible -->
+                            <CheckBox IsChecked="{Binding IsVisible}" VerticalOptions="Center" Grid.Column="0" />
 
-                                <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
+                            <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
 
-                                <!-- Replace ColorPicker with BoxView to show color -->
-                                <BoxView Color="{Binding color}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="2" >
-                                    <BoxView.GestureRecognizers>
-                                        <SwipeGestureRecognizer Direction="Right"  Swiped="SwipeGestureRecognizer_Swiped">
-                                        </SwipeGestureRecognizer>
-                                    </BoxView.GestureRecognizers>
-                                </BoxView>
-                            </Grid>
-                        </ViewCell>
+                            <!-- Replace ColorPicker with BoxView to show color -->
+                            <BoxView Color="{Binding color}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="2" >
+                                <BoxView.GestureRecognizers>
+                                    <SwipeGestureRecognizer Direction="Right"  Swiped="SwipeGestureRecognizer_Swiped">
+                                    </SwipeGestureRecognizer>
+                                </BoxView.GestureRecognizers>
+                            </BoxView>
+                        </Grid>
                     </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
 
             <!-- Fixed "Groups" title -->
             <Label Text="Groups" FontAttributes="Bold" Grid.Row="3" />
 
             <!-- Fixed header row for Groups -->
             <Grid Grid.Row="4" Padding="5" ColumnDefinitions="Auto,*,Auto" BackgroundColor="Transparent">
-                <Label Text="Paint" VerticalOptions="Center" />
+                <Label Text="Paint  " VerticalOptions="Center" />
                 <Label Text="Layer" VerticalOptions="Center" Grid.Column="1" />
                 <Label Text="Closed Count" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
             </Grid>
@@ -131,30 +129,28 @@ END PSEUDOCODE
             <ScrollView Grid.Row="5" VerticalOptions="Fill">
                 <VerticalStackLayout Spacing="10">
                     <!-- ListView for closed polyline groups (without header) -->
-                    <ListView x:Name="ClosedGroupsListView"
-                              ItemsSource="{Binding VisibleClosedGroups[0]}"
-                              HasUnevenRows="True"
-                              BackgroundColor="Transparent"
-                              HeightRequest="300"
-                              ItemSelected="ClosedGroupsListView_ItemSelected">
-                        <ListView.ItemTemplate>
+                    <CollectionView x:Name="ClosedGroupsListView"
+                                    ItemsSource="{Binding VisibleClosedGroups[0]}"
+                                    BackgroundColor="Transparent"
+                                    HeightRequest="300"
+                                    SelectionMode="Single"
+                                    SelectionChanged="ClosedGroupsListView_SelectionChanged">
+                        <CollectionView.ItemTemplate>
                             <!-- Use runtime bindings (no x:DataType) so property names resolve at runtime -->
                             <DataTemplate>
-                                <ViewCell>
-                                    <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
-                                        <!-- Checkbox bound to whether this closed group is painted -->
-                                        <CheckBox IsChecked="{Binding IsPainted, Mode=TwoWay}" VerticalOptions="Center" Grid.Column="0"/>
+                                <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
+                                    <!-- Checkbox bound to whether this closed group is painted -->
+                                    <CheckBox IsChecked="{Binding IsPainted, Mode=TwoWay}" VerticalOptions="Center" Grid.Column="0"/>
 
-                                        <!-- Layer name for the closed group -->
-                                        <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
+                                    <!-- Layer name for the closed group -->
+                                    <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
 
-                                        <!-- Number of closed polylines in the group -->
-                                        <Label Text="{Binding ClosedPlinesCount}" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
-                                    </Grid>
-                                </ViewCell>
+                                    <!-- Number of closed polylines in the group -->
+                                    <Label Text="{Binding ClosedPlinesCount}" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
+                                </Grid>
                             </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
 
                     <!-- Label for selected polylines section -->
                     <Label Text="Polylines in Selected Group" FontAttributes="Bold" Padding="5,10,5,0" />
@@ -166,26 +162,24 @@ END PSEUDOCODE
                         <Label Text="Painted" FontAttributes="Bold" Grid.Column="2" HorizontalTextAlignment="Center" />
                     </Grid>
 
-                    <!-- New ListView to show Pline2DModels of the selected closed group (without header) -->
-                    <ListView x:Name="SelectedPlinesListView"
-                              HasUnevenRows="True"
-                              BackgroundColor="Transparent"
-                              HeightRequest="300">
-                        <ListView.ItemTemplate>
+                    <!-- New CollectionView to show Pline2DModels of the selected closed group (without header) -->
+                    <CollectionView x:Name="SelectedPlinesListView"
+                                    BackgroundColor="Transparent"
+                                    HeightRequest="300"
+                                    SelectionMode="None" ItemsSource="">
+                        <CollectionView.ItemTemplate>
                             <DataTemplate>
-                                <ViewCell>
-                                    <Grid Padding="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                                        <Label Text="{Binding Layer}" />
-                                        <Label Text="{Binding Id,Mode=OneWay}" Grid.Column="1" />
-                                        <CheckBox IsChecked="{Binding IsPainted, Mode=TwoWay}" 
-                                                  VerticalOptions="Center" 
-                                                  CheckedChanged="PlinePainted_CheckedChanged" 
-                                                  Grid.Column="2" />
-                                    </Grid>
-                                </ViewCell>
+                                <Grid Padding="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                    <Label Text="{Binding Layer}" />
+                                    <Label Text="{Binding Id,Mode=OneWay}" Grid.Column="1" />
+                                    <CheckBox IsChecked="{Binding IsPainted, Mode=TwoWay}" 
+                                              VerticalOptions="Center" 
+                                              CheckedChanged="PlinePainted_CheckedChanged" 
+                                              Grid.Column="2" />
+                                </Grid>
                             </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
                 </VerticalStackLayout>
             </ScrollView>
         </Grid>

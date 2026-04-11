@@ -45,32 +45,29 @@ namespace NumberArtistView
         private Array bytes;
         public MainPage(DatabaseService databaseService)
         {
-            InitializeComponent(); // This now correctly loads the UI from MainPage.xaml
+            InitializeComponent();
             ResourceAccess ra = new ResourceAccess();
             BindingContext = this;
 
             OnPropertyChanged(nameof(BackgroundImage));
             _databaseService = databaseService;
 
-            var userIdString = Preferences.Get("userId", string.Empty); // Get the user ID as string
+            var userIdString = Preferences.Get("userId", string.Empty);
             if (!Guid.TryParse(userIdString, out _userId))
             {
                 _userId = Guid.Empty;
             }
 
-
             polylineDrawable = new PolylineDrawable();
-            this.GraphicsView.Drawable = (IDrawable)polylineDrawable; // Use the GraphicsView from XAML
+            this.GraphicsView.Drawable = (IDrawable)polylineDrawable;
+            LayersListView.SelectionChanged += LayerPicker_SelectionChanged;
 
-            // The ListView in XAML is named LayersListView, let's bind its selection changed event
-            LayersListView.ItemSelected += LayerPicker_ItemSelected;
+            // Remove fire-and-forget Task.Run
+        }
 
-
-            //var recordCount = Task.Run(async () => _databaseService.GetRecordCount().Result);
-
-            //var files= Task.Run(async () => _databaseService.GetDxfFilesAsync(_userId).Result);
-            //// Load files into picker on a background thread
-            Task.Run(async () => await LoadDxfFilesIntoPicker());
+        private void LayerPicker_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+        {
+            throw new NotImplementedException();
         }
 
         // Rebuilds VisibleClosedGroups from the current polylineDrawable state and VisibleLayers set.
@@ -135,20 +132,20 @@ namespace NumberArtistView
             //   Task.Run(async () => await _databaseService.CopyFilesFromServerToLocalDb);
 
 
-            Task.Run(async () => await LoadDxfFilesIntoPicker());
+            await Task.Run(async () => await LoadDxfFilesIntoPicker());
 
             // You can also await the other tasks here if needed
             var recordCount = await _databaseService.GetRecordCount();
             var files = await _databaseService.GetDxfFilesAsync(_userId);
             // Now 'files' will contain the list of DxfFileEntry objects
-
+            Debug.WriteLine($"Record count: {recordCount}");   
         }
 
         private async Task LoadDxfFilesIntoPicker()
         {
             if (_userId == Guid.Empty)
             {
-                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Could not determine user.", "OK"));
+                await MainThread.InvokeOnMainThreadAsync(async () => await DisplayAlertAsync("Error", "Could not determine user.", "OK"));
                 return;
             }
 
@@ -158,6 +155,7 @@ namespace NumberArtistView
 
             var dxfFiles = await _databaseService.GetDxfFilesAsync(_userId);
 
+            
 
             var entryFiles = dxfFiles.DistinctBy<DxfFileEntry, string>(x => x.ResourceName).ToList();
             MainThread.BeginInvokeOnMainThread(() =>
@@ -178,9 +176,9 @@ namespace NumberArtistView
             var _bytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(dxfFileEntry));
             if (_bytes == null || _bytes.Length == 0)
             {
-                await MainThread.InvokeOnMainThreadAsync(() =>
+                await MainThread.InvokeOnMainThreadAsync(async () =>
                 {
-                    DisplayAlert("Error", "DXF file data is empty.", "OK");
+                    await DisplayAlertAsync("Error", "DXF file data is empty.", "OK");
                 });
                 return;
             }
@@ -193,9 +191,9 @@ namespace NumberArtistView
 
                     if (loaded == null)
                     {
-                        await MainThread.InvokeOnMainThreadAsync(() =>
+                        await MainThread.InvokeOnMainThreadAsync(async () =>
                         {
-                            DisplayAlert("Error", "Error loading DXF file.", "OK");
+                            await DisplayAlertAsync("Error", "Error loading DXF file.", "OK");
                         });
                         return;
                     }
@@ -251,9 +249,9 @@ namespace NumberArtistView
             }
             catch (Exception ex)
             {
-                await MainThread.InvokeOnMainThreadAsync(() =>
+                await MainThread.InvokeOnMainThreadAsync(async () =>
                 {
-                    DisplayAlert("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK");
+                    await DisplayAlertAsync("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK");
                 });
             }
 
@@ -298,7 +296,7 @@ namespace NumberArtistView
         {
             if (dxfFile == null)
             {
-                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Invalid resource Id.", "OK"));
+                await MainThread.InvokeOnMainThreadAsync(async () => await DisplayAlertAsync("Error", "Invalid resource Id.", "OK"));
                 return;
             }
 
@@ -308,7 +306,7 @@ namespace NumberArtistView
             var bytes = await resourceaccess.GetReferenceImageBytesAsync(dxfFile.ReferenceDrawingId);
             if (bytes == null || bytes.Length == 0)
             {
-                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Failed to load background resource bytes.", "OK"));
+                await MainThread.InvokeOnMainThreadAsync(async () => await DisplayAlertAsync("Error", "Failed to load background resource bytes.", "OK"));
                 return;
             }
 
@@ -343,7 +341,7 @@ namespace NumberArtistView
         {
             if (string.IsNullOrWhiteSpace(resourceName))
             {
-                await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "Invalid resource name.", "OK"));
+                await MainThread.InvokeOnMainThreadAsync(async () => await DisplayAlertAsync("Error", "Invalid resource name.", "OK"));
                 return;
             }
 
@@ -358,7 +356,7 @@ namespace NumberArtistView
                 // Validate buffer
                 if (dxfFile == null || dxfFile.Length == 0)
                 {
-                    await MainThread.InvokeOnMainThreadAsync(() => DisplayAlert("Error", "DXF resource is empty or could not be loaded.", "OK"));
+                    await MainThread.InvokeOnMainThreadAsync(async () => await DisplayAlertAsync("Error", "DXF resource is empty or could not be loaded.", "OK"));
                     return;
                 }
 
@@ -382,15 +380,15 @@ namespace NumberArtistView
                 catch (Exception bgEx)
                 {
                     // If parsing fails on background thread, surface error to UI
-                    await MainThread.InvokeOnMainThreadAsync(() =>
-                        DisplayAlert("Error", $"Error parsing DXF file: {bgEx.Message}", "OK"));
+                    await MainThread.InvokeOnMainThreadAsync(async () =>
+                        await DisplayAlertAsync("Error", $"Error parsing DXF file: {bgEx.Message}", "OK"));
                     return;
                 }
 
                 if (loaded == null)
                 {
-                    await MainThread.InvokeOnMainThreadAsync(() =>
-                        DisplayAlert("Error", "Error loading DXF file (DxfDocument.Load returned null).", "OK"));
+                    await MainThread.InvokeOnMainThreadAsync(async () =>
+                        await DisplayAlertAsync("Error", "Error loading DXF file (DxfDocument.Load returned null).", "OK"));
                     return;
                 }
 
@@ -473,8 +471,8 @@ namespace NumberArtistView
             }
             catch (Exception ex)
             {
-                await MainThread.InvokeOnMainThreadAsync(() =>
-                    DisplayAlert("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK"));
+                await MainThread.InvokeOnMainThreadAsync(async () =>
+                    await DisplayAlertAsync("Error", $"An error occurred while loading the DXF file: {ex.Message}", "OK"));
             }
 
             static Color GetColourSafe(short index)
@@ -748,7 +746,7 @@ namespace NumberArtistView
             }
             catch (Exception ex)
             {
-                await DisplayAlert("Error", $"An error occurred while selecting the DXF file: {ex.Message}", "OK");
+                await DisplayAlertAsync("Error", $"An error occurred while selecting the DXF file: {ex.Message}", "OK");
             }
         }
         private void SwipeGestureRecognizer_Swiped(object sender, SwipedEventArgs e)
@@ -831,7 +829,7 @@ namespace NumberArtistView
 
         private async void ClosedGroupsListView_ItemSelected(object sender, SelectedItemChangedEventArgs e)
         {
-            var groupsListView = sender as ListView;
+            var groupsListView = sender as CollectionView;
             if (groupsListView?.SelectedItem is LayerClosedGroup selectedGroup)
             {
                 // Restore polyline states before binding
@@ -856,8 +854,11 @@ namespace NumberArtistView
             // Clear user session data
             Preferences.Clear("UserId");
 
-            // Navigate back to the LoginPage by setting it as the new MainPage
-            Application.Current.MainPage = new LoginPage();
+            // Navigate back to the LoginPage using the recommended approach
+            if (Application.Current?.Windows.Count > 0)
+            {
+                Application.Current.Windows[0].Page = new LoginPage();
+            }
         }
         //private async void DiagnoticsButton_Clicked(object sender, EventArgs e)
         //{

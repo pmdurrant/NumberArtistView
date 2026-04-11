@@ -7,9 +7,9 @@ namespace NumberArtistView.Models
     {
         public int Id { get; set; }    
         public bool IsClosed { get; set; }
-        public string Layer { get; set; }
-        public object LayerColour { get; set; }
-        public object Vertices { get; set; }
+        public required string Layer { get; set; }
+        public required object LayerColour { get; set; }
+        public required object Vertices { get; set; }
       //  public Action<object?, PropertyChangedEventArgs> PropertyChanged { get; internal set; }
 
         /// <summary>

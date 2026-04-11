@@ -9,8 +9,7 @@
       "Core.Business.Objects/1.0.0": {
         "dependencies": {
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "10.0.5",
-          "sqlite-net-pcl": "1.9.172",
-          "netDxf": "3.0.1.0"
+          "sqlite-net-pcl": "1.9.172"
         },
         "runtime": {
           "Core.Business.Objects.dll": {}
@@ -428,14 +427,6 @@
             "fileVersion": "2.1.2.1721"
           }
         }
-      },
-      "netDxf/3.0.1.0": {
-        "runtime": {
-          "netDxf.dll": {
-            "assemblyVersion": "3.0.1.0",
-            "fileVersion": "3.0.1.0"
-          }
-        }
       }
     }
   },
@@ -633,11 +624,6 @@
       "sha512": "sha512-lxCZarZdvAsMl2zw9bXHrXK6RxVhB4b23iTFhCOdHFhxfbsxLxWf+ocvswJwR/9Wh/E//ddMi+wJGqUKV7VwoA==",
       "path": "sqlitepclraw.provider.e_sqlite3/2.1.2",
       "hashPath": "sqlitepclraw.provider.e_sqlite3.2.1.2.nupkg.sha512"
-    },
-    "netDxf/3.0.1.0": {
-      "type": "reference",
-      "serviceable": false,
-      "sha512": ""
     }
   }
 }

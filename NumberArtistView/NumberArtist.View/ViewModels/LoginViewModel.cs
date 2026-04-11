@@ -1,5 +1,6 @@
 using Core.Business.Objects;
 using NumberArtistView;
+using NumberArtistView.Services;
 using System.ComponentModel;
 using System.Net;
 using System.Net.Http;
@@ -54,23 +55,46 @@ namespace NumberArtist.View.ViewModels
 
         public LoginViewModel()
         {
-            // Disable proxy to avoid requests being routed to a local proxy (which can result in 127.0.0.1:80)
+            // Get API URL from centralized configuration
+            var apiUrl = ApiConfiguration.GetApiUrl();
+            Debug.WriteLine($"LoginViewModel: Using API URL: {apiUrl}");
+
+#if DEBUG
+            // For development, bypass SSL certificate validation for self-signed certs
+            var handler = new HttpClientHandler
+            {
+                UseProxy = false,
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                {
+                    Debug.WriteLine($"LoginViewModel: SSL Certificate validation: {errors}");
+                    return true;
+                }
+            };
+#else
             var handler = new HttpClientHandler
             {
                 UseProxy = false
             };
+#endif
 
             _httpClient = new HttpClient(handler)
             {
-                // Ensure trailing slash to avoid URI composition surprises
-                BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/")
+                BaseAddress = new Uri(apiUrl),
+                Timeout = TimeSpan.FromSeconds(30)
             };
+
+            // Set Host header when using IP addresses for SNI
+            if (ApiConfiguration.UseFallbackIP || ApiConfiguration.UseLocalhost)
+            {
+                _httpClient.DefaultRequestHeaders.Host = ApiConfiguration.GetHostname() + ":5015";
+                Debug.WriteLine($"LoginViewModel: Set Host header to: {_httpClient.DefaultRequestHeaders.Host}");
+            }
 
             LoginCommand = new Command(async () => await LoginAsync());
 
             // Start the resolver in background (non-blocking).
             // Use StartResolve to ensure it only starts once.
-            StartResolve("https://numberartist.officeblox.co.uk:5015");
+            StartResolve(apiUrl);
         }
 
         private void StartResolve(string url)
@@ -110,17 +134,24 @@ namespace NumberArtist.View.ViewModels
 
         private async Task LoginAsync()
         {
-            var loginModel = new { Username, Password };
-            var json = JsonSerializer.Serialize(loginModel);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-
             try
             {
+                Debug.WriteLine($"LoginViewModel: Starting login for user: {Username}");
+                Debug.WriteLine($"LoginViewModel: API Base Address: {_httpClient.BaseAddress}");
+
+                var loginModel = new { Username, Password };
+                var json = JsonSerializer.Serialize(loginModel);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                Debug.WriteLine($"LoginViewModel: Posting to api/auth/login");
                 var response = await _httpClient.PostAsync("api/auth/login", content);
+
+                Debug.WriteLine($"LoginViewModel: Response Status Code: {response.StatusCode}");
 
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"LoginViewModel: Login successful, parsing token response");
                     var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                     // Store the token securely
@@ -128,6 +159,8 @@ namespace NumberArtist.View.ViewModels
                     Preferences.Set("auth_token", tokenResponse.Token);
                     Preferences.Set("userId", tokenResponse.UserId);
                     await SecureStorage.SetAsync("userId", tokenResponse.UserId);
+
+                    Debug.WriteLine($"LoginViewModel: Token stored, navigating to main page");
                     // Navigate to the main page on the main thread
                     MainThread.BeginInvokeOnMainThread(() =>
                     {
@@ -136,15 +169,30 @@ namespace NumberArtist.View.ViewModels
                 }
                 else
                 {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"LoginViewModel: Login failed - Status: {response.StatusCode}, Error: {errorContent}");
                     // Handle unsuccessful login
                     await Application.Current.MainPage.DisplayAlert("Login Failed", "Invalid username or password.", "OK");
                 }
             }
+            catch (HttpRequestException ex)
+            {
+                Debug.WriteLine($"LoginViewModel: HTTP Request Exception: {ex.Message}");
+                Debug.WriteLine($"LoginViewModel: Inner Exception: {ex.InnerException?.Message}");
+                // Handle exceptions, e.g., network errors
+                await Application.Current.MainPage.DisplayAlert("Error", $"Connection error: {ex.Message}", "OK");
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"LoginViewModel: Request timeout: {ex.Message}");
+                await Application.Current.MainPage.DisplayAlert("Error", "Request timed out. Please try again.", "OK");
+            }
             catch (Exception ex)
             {
-               
+                Debug.WriteLine($"LoginViewModel: Unexpected error: {ex.Message}");
+                Debug.WriteLine($"LoginViewModel: Stack trace: {ex.StackTrace}");
                 // Handle exceptions, e.g., network errors
-                await Application.Current.MainPage.DisplayAlert("Error", $"An error occurred: {ex.Message} ipaddress {IpAddress}", "OK");
+                await Application.Current.MainPage.DisplayAlert("Error", $"An error occurred: {ex.Message}", "OK");
             }
         }
 

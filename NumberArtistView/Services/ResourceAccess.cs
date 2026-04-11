@@ -34,15 +34,49 @@ namespace NumberArtistView.Services
 
             _database = new SQLiteAsyncConnection(dbPath);
 
+            // Use ApiConfiguration to get the correct URL (handles localhost vs production)
+            var apiUrl = ApiConfiguration.GetApiUrl();
+            Debug.WriteLine($"ResourceAccess: Using API URL: {apiUrl}");
+            
+#if DEBUG
+            var handler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                {
+                    Debug.WriteLine($"SSL Certificate validation in ResourceAccess: {errors}");
+                    return true; // Accept all certificates in debug mode
+                }
+            };
+            
+            _httpClient = new HttpClient(handler)
+            {
+                BaseAddress = new Uri(apiUrl.EndsWith('/') ? apiUrl : apiUrl + "/"),
+                Timeout = TimeSpan.FromSeconds(30)
+            };
+#else
             _httpClient = new HttpClient
             {
-                BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/")
+                BaseAddress = new Uri(apiUrl.EndsWith('/') ? apiUrl : apiUrl + "/"),
+                Timeout = TimeSpan.FromSeconds(30)
             };
+#endif
+
+            // When using IP address, set the Host header for proper routing
+            if (ApiConfiguration.UseFallbackIP || ApiConfiguration.UseLocalhost)
+            {
+                _httpClient.DefaultRequestHeaders.Host = ApiConfiguration.GetHostname() + ":5015";
+                Debug.WriteLine($"ResourceAccess - Set Host header to: {_httpClient.DefaultRequestHeaders.Host}");
+            }
 
             var token = Preferences.Get("auth_token", string.Empty);
             if (!string.IsNullOrEmpty(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                Debug.WriteLine("ResourceAccess: Auth token set");
+            }
+            else
+            {
+                Debug.WriteLine("ResourceAccess: No auth token found");
             }
         }
 
@@ -50,10 +84,14 @@ namespace NumberArtistView.Services
         public async Task<byte[]?> GetResourceAsync(string resourceName)
         {
             if (string.IsNullOrWhiteSpace(resourceName))
+            {
+                Debug.WriteLine("GetResourceAsync: resourceName is null or empty");
                 return null;
+            }
 
             // Sanitize filename to avoid path traversal
             var safeName = Path.GetFileName(resourceName);
+            Debug.WriteLine($"GetResourceAsync: Requesting resource '{safeName}'");
 
             var targetDirectory = Path.Combine(FileSystem.Current.AppDataDirectory, "dxf_files");
             Directory.CreateDirectory(targetDirectory);
@@ -65,11 +103,12 @@ namespace NumberArtistView.Services
             {
                 try
                 {
+                    Debug.WriteLine($"GetResourceAsync: Found cached file at {targetFile}");
                     return await File.ReadAllBytesAsync(targetFile);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error reading cached resource file: {ex.Message}");
+                    Debug.WriteLine($"Error reading cached resource file: {ex.Message}");
                     // fall through to re-fetch from server
                 }
             }
@@ -78,7 +117,18 @@ namespace NumberArtistView.Services
             {
                 // Request headers-first so we can stream the body
                 var requestUri = $"api/dxffiles/GetResource?resourceName={Uri.EscapeDataString(safeName)}";
+                Debug.WriteLine($"GetResourceAsync: Fetching from {_httpClient.BaseAddress}{requestUri}");
+                
                 using var response = await _httpClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead);
+                
+                Debug.WriteLine($"GetResourceAsync: Response status: {response.StatusCode}");
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"GetResourceAsync: Error response: {errorContent}");
+                }
+                
                 response.EnsureSuccessStatusCode();
 
                 // Stream response to disk to avoid large in-memory buffers
@@ -98,17 +148,25 @@ namespace NumberArtistView.Services
                     File.Move(tempFile, targetFile);
                 }
 
+                Debug.WriteLine($"GetResourceAsync: Successfully saved to {targetFile}");
                 // Return the bytes we just saved
                 return await File.ReadAllBytesAsync(targetFile);
             }
             catch (HttpRequestException ex)
             {
-                Console.WriteLine($"Error fetching resource: {ex.Message}");
+                Debug.WriteLine($"GetResourceAsync: HTTP Request Exception: {ex.Message}");
+                Debug.WriteLine($"GetResourceAsync: Inner Exception: {ex.InnerException?.Message}");
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"GetResourceAsync: Request timed out: {ex.Message}");
                 return null;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                Debug.WriteLine($"GetResourceAsync: Unexpected error: {ex.Message}");
+                Debug.WriteLine($"GetResourceAsync: Stack trace: {ex.StackTrace}");
                 return null;
             }
         }
@@ -541,7 +599,12 @@ namespace NumberArtistView.Services
 public async Task<byte[]?> GetReferenceImageBytesAsync(long referenceFileId)
         {
             if (referenceFileId <= 0)
+            {
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Invalid referenceFileId: {referenceFileId}");
                 return null;
+            }
+
+            Debug.WriteLine($"GetReferenceImageBytesAsync: Requesting image for referenceFileId={referenceFileId}");
 
             try
             {
@@ -551,9 +614,13 @@ public async Task<byte[]?> GetReferenceImageBytesAsync(long referenceFileId)
                 {
                     if (referenceFileId <= int.MaxValue)
                         dxfReferenceEntry = await _database.FindAsync<ReferenceDrawing>((int)referenceFileId);
+                    
+                    if (dxfReferenceEntry != null)
+                        Debug.WriteLine($"GetReferenceImageBytesAsync: Found in DB - Name={dxfReferenceEntry.Name}");
                 }
-                catch
+                catch (Exception dbEx)
                 {
+                    Debug.WriteLine($"GetReferenceImageBytesAsync: DB lookup error: {dbEx.Message}");
                     dxfReferenceEntry = null;
                 }
 
@@ -570,20 +637,36 @@ public async Task<byte[]?> GetReferenceImageBytesAsync(long referenceFileId)
                     {
                         try
                         {
+                            Debug.WriteLine($"GetReferenceImageBytesAsync: Found cached image at {targetFile}");
                             return await File.ReadAllBytesAsync(targetFile);
                         }
-                        catch
+                        catch (Exception fileEx)
                         {
+                            Debug.WriteLine($"GetReferenceImageBytesAsync: Error reading cached file: {fileEx.Message}");
                             // if reading fails, fall through to re-download
                         }
                     }
                 }
 
                 // Fetch from server endpoint that returns image bytes
-                var response = await _httpClient.GetAsync($"api/Dxffiles/GetReferenceImage/{referenceFileId}");
+                var requestUri = $"api/Dxffiles/GetReferenceImage/{referenceFileId}";
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Fetching from {_httpClient.BaseAddress}{requestUri}");
+                
+                var response = await _httpClient.GetAsync(requestUri);
+                
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Response status: {response.StatusCode}");
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"GetReferenceImageBytesAsync: Error response: {errorContent}");
+                }
+                
                 response.EnsureSuccessStatusCode();
 
                 var contentBytes = await response.Content.ReadAsByteArrayAsync();
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Received {contentBytes?.Length ?? 0} bytes");
+                
                 if (contentBytes != null && contentBytes.Length > 0)
                 {
                     // If we have a target path, write it for caching

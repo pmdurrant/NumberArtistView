@@ -43,6 +43,9 @@ namespace NumberArtistView.Services
                 Debug.WriteLine("DatabaseService: Ensured PolylineState table exists");
                 
                 _filesPathRef = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files");
+                Directory.CreateDirectory(_filesPathRef);
+
+                
 
             }
             catch (Exception ex)
@@ -75,7 +78,39 @@ namespace NumberArtistView.Services
             Debug.WriteLine("DatabaseService: CopyFilesFromServerToLocalDb start");
             try
             {
-                using var httpClient = new HttpClient { BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/") };
+                // Use ApiConfiguration to get the correct URL (handles localhost vs production)
+                var apiUrl = ApiConfiguration.GetApiUrl();
+                Debug.WriteLine($"DatabaseService: Using API URL: {apiUrl}");
+
+#if DEBUG
+                var handler = new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                    {
+                        Debug.WriteLine($"DatabaseService: SSL Certificate validation: {errors}");
+                        return true; // Accept all certificates in debug mode
+                    }
+                };
+
+                var httpClient = new HttpClient(handler)
+                {
+                    BaseAddress = new Uri(apiUrl.EndsWith('/') ? apiUrl : apiUrl + "/"),
+                    Timeout = TimeSpan.FromSeconds(30)
+                };
+#else
+                var httpClient = new HttpClient
+                {
+                    BaseAddress = new Uri(apiUrl.EndsWith('/') ? apiUrl : apiUrl + "/"),
+                    Timeout = TimeSpan.FromSeconds(30)
+                };
+#endif
+
+                // When using IP address, set the Host header for proper routing
+                if (ApiConfiguration.UseFallbackIP || ApiConfiguration.UseLocalhost)
+                {
+                    httpClient.DefaultRequestHeaders.Host = ApiConfiguration.GetHostname() + ":5015";
+                    Debug.WriteLine($"DatabaseService: Set Host header to: {httpClient.DefaultRequestHeaders.Host}");
+                }
 
                 var token = Preferences.Get("auth_token", string.Empty);
                 if (!string.IsNullOrEmpty(token))
@@ -84,7 +119,9 @@ namespace NumberArtistView.Services
                     Debug.WriteLine("DatabaseService: Added auth token to request headers");
                 }
 
-                var userIdString = await SecureStorage.GetAsync("userId");
+                using var _ = httpClient; // Ensure disposal
+             
+              var userIdString = await SecureStorage.GetAsync("userId");
                 if (string.IsNullOrEmpty(userIdString))
                 {
                     Debug.WriteLine("DatabaseService: userId not found in secure storage");
@@ -165,7 +202,11 @@ namespace NumberArtistView.Services
                         {
                             Debug.WriteLine($"DatabaseService: Error reading ReferenceDrawingId: {ex.Message}");
                         }
-
+                        if (newFileEntry.ReferenceDrawingId == 0)
+                        {
+                            Debug.WriteLine($"DatabaseService: Error reading ReferenceDrawingId value 0");
+                           
+                        }
                         await _database.InsertAsync(newFileEntry);
                         Debug.WriteLine($"DatabaseService: Inserted new DxfFileEntry ResourceName={resourceName} Id={newFileEntry.Id}");
 
