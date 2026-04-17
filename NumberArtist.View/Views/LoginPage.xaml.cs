@@ -1,12 +1,18 @@
-using NumberArtist.View.ViewModels;
+using System;
+using Microsoft.Maui.Controls;
 
-namespace NumberArtist.View;
-
-public partial class LoginPage : ContentPage
+namespace NumberArtist.View.Views
 {
-    public LoginPage(LoginViewModel viewModel)
+    public partial class LoginPage : ContentPage
     {
-        InitializeComponent();
-        BindingContext = viewModel;
+        public LoginPage()
+        {
+            InitializeComponent();
+        }
+
+        private void OnTogglePasswordVisibilityClicked(object? sender, EventArgs e)
+        {
+            PasswordEntry.IsPassword = !PasswordEntry.IsPassword;
+        }
     }
 }

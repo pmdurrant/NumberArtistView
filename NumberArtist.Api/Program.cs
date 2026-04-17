@@ -1,13 +1,17 @@
+using Core.Business.Objects;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using NumberArtist.Api.Data;
-using Core.Business.Objects;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+
+
+
 
 var builder = WebApplication.CreateBuilder(args);
 var loadpath = Path.Combine(Directory.GetCurrentDirectory(), "https/_.officeblox.co.uk.pfx");
@@ -30,7 +34,6 @@ catch (Exception ex)
     Console.WriteLine("SSL Certificate could not be found or is invalid. Kestrel will use default configuration.");
     Console.WriteLine(ex.Message);
 }
-
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
@@ -43,36 +46,32 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddIdentity<AppUser, IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
-
+builder.Services.AddOpenApi();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "NumberArtist.Api", Version = "v1" });
-
-    // Define the BearerAuth scheme
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    c.SwaggerDoc("v1", new OpenApiInfo
     {
-        Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer"
+        Title = "NumberArtist API",
+        Version = "v1",
+        Description = "API for NumberArtist application - DXF file processing and management"
     });
 
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    // Define the BearerAuth scheme
+    c.AddSecurityDefinition("bearer", new OpenApiSecurityScheme
     {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            new string[] {}
-        }
+        Name = "JWT Authentication",
+        Description = "JWT Authorization header using the Bearer scheme.",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = JwtBearerDefaults.AuthenticationScheme,
+        BearerFormat = "JWT",
+    });
+
+    c.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("bearer", document)] = []
     });
 });
 
@@ -100,9 +99,11 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    app.MapOpenApi();
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
@@ -115,7 +116,6 @@ else
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 

@@ -1,130 +1,253 @@
-using Microsoft.Maui.Graphics;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Numerics;
+        using System;
+        using System.Collections.Generic;
+        using System.ComponentModel;
+        using System.Linq;
+        using Microsoft.Maui.Graphics;
+        using NumberArtistView.Models;
 
-using Core.Business.Objects;
-using System.Drawing;
-using PointF = Microsoft.Maui.Graphics.PointF;
-
-namespace NumberArtistView
-{
-    public class PolylineDrawable : IDrawable
-    {
-        public List<Pline2DModel> Polylines { get; set; } = new List<Pline2DModel>();
-        public IEnumerable<string> Layers => Polylines.Select(p => p.Layer).Distinct();
-        public string SelectedLayer { get; set; }
-        public float Scale { get; set; } = 1.0f;
-        public float OffsetX { get; set; } = 0f;
-        public float OffsetY { get; set; } = 0f;
-
-        public void FitToView(RectF dirtyRect)
+        namespace NumberArtistView
         {
-            if (Polylines == null || !Polylines.Any()) return;
-
-            var allVertices = Polylines.SelectMany(p => p.Vertices).ToList();
-            if (!allVertices.Any()) return;
-
-            var minX = (float)allVertices.Min(v => v.X);
-            var maxX = (float)allVertices.Max(v => v.X);
-            var minY = (float)allVertices.Min(v => v.Y);
-            var maxY = (float)allVertices.Max(v => v.Y);
-
-            var modelWidth = maxX - minX;
-            var modelHeight = maxY - minY;
-
-            const float epsilon = 1e-6f;
-            if (Math.Abs(modelWidth) < epsilon || Math.Abs(modelHeight) < epsilon) return;
-
-            Scale = Math.Min(dirtyRect.Width / modelWidth, dirtyRect.Height / modelHeight) * 0.9f;
-            OffsetX = (dirtyRect.Width - modelWidth * Scale) / 2f - minX * Scale;
-            OffsetY = (dirtyRect.Height - modelHeight * Scale) / 2f - minY * Scale;
-        }
-
-        public void Draw(ICanvas canvas, RectF dirtyRect)
-        {
-            var polylinesToDraw = string.IsNullOrEmpty(SelectedLayer)
-                ? Polylines
-                : Polylines.Where(p => p.Layer == SelectedLayer);
-
-            if (polylinesToDraw == null || !polylinesToDraw.Any()) return;
-
-            canvas.StrokeColor = Colors.Black;
-            canvas.StrokeSize = 2 / Scale; // Keep stroke size consistent when zooming
-
-            foreach (var polyline in polylinesToDraw)
+            // Assumes Pline2DModel and VertexModel exist in the project as used by MainPage
+            public class PolylineDrawable : IDrawable, INotifyPropertyChanged
             {
-                var path = new PathF();
-                var firstVertex = polyline.Vertices.First();
-
-                var startPoint = new PointF(
-                    (float)firstVertex.X * Scale + OffsetX,
-                    (float)firstVertex.Y * Scale + OffsetY
-                );
-                path.MoveTo(startPoint);
-
-                for (int i = 0; i < polyline.Vertices.Count; i++)
+                private List<Pline2DModel> _polylines = new();
+                public List<Pline2DModel> Polylines
                 {
-                    var startVertex = polyline.Vertices[i];
-                    var endVertex = (i == polyline.Vertices.Count - 1) ?
-                                    (polyline.IsClosed ? polyline.Vertices[0] : null)
-                                    : polyline.Vertices[i + 1];
-
-                    if (endVertex == null) continue;
-
-                    var transformedStart = new VertexModel
+                    get => _polylines;
+                    set
                     {
-                        X = startVertex.X * Scale + OffsetX,
-                        Y = startVertex.Y * Scale + OffsetY,
-                        Bulge = startVertex.Bulge
-                    };
-
-                    var transformedEnd = new VertexModel
-                    {
-                        X = endVertex.X * Scale + OffsetX,
-                        Y = endVertex.Y * Scale + OffsetY,
-                        Bulge = endVertex.Bulge
-                    };
-
-                    if (startVertex.Bulge == 0)
-                    {
-                        path.LineTo((float)transformedEnd.X, (float)transformedEnd.Y);
-                    }
-                    else
-                    {
-                        AddArcToPath(path, transformedStart, transformedEnd);
+                        _polylines = value ?? new List<Pline2DModel>();
+                        OnPropertyChanged(nameof(Polylines));
+                        OnPropertyChanged(nameof(Layers));
                     }
                 }
 
-                if (polyline.IsClosed)
+                // Selected layer name (empty or null means none)
+                private string _selectedLayer = string.Empty;
+                public string SelectedLayer
                 {
-                    path.Close();
+                    get => _selectedLayer;
+                    set
+                    {
+                        if (_selectedLayer != value)
+                        {
+                            _selectedLayer = value ?? string.Empty;
+                            OnPropertyChanged(nameof(SelectedLayer));
+                        }
+                    }
                 }
 
-                canvas.DrawPath(path);
+                // Null means "all visible"
+                public HashSet<string>? VisibleLayers { get; set; } = null;
+
+                // Computed list of available layer names (ordered)
+                public IEnumerable<string> Layers => Polylines?.Select(p => p.Layer ?? string.Empty).Distinct().OrderBy(s => s) ?? Enumerable.Empty<string>();
+        public Pline2DModel[] Shapes { get; private set; }
+        public Pline2DModel[] vertices { get; private set; }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+                protected void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+                public void Draw(ICanvas canvas, RectF dirtyRect)
+                {
+
+                    if (Polylines == null || Polylines.Count == 0)
+                        return;
+
+                    // Determine which polylines to render according to VisibleLayers
+                    var toDraw = Polylines.Where(p =>
+                    {
+                        var layerName = p.Layer ?? string.Empty;
+                        return VisibleLayers == null || VisibleLayers.Count == 0 || VisibleLayers.Contains(layerName);
+                    }).ToList();
+
+                    if (!toDraw.Any())
+                        return;
+                    int index = 0;
+                    foreach (var pl in toDraw)
+                            {
+                                pl.Id = index++;
+                            }
+            //var ff = Polylines.Where(p =>
+            //{
+            //    var layerName = p.Layer ?? string.Empty;
+            //    return VisibleLayers == null || VisibleLayers.Count == 0 || VisibleLayers.Contains(layerName) && VisibleLayers.co;
+            //}).ToList();
+
+            vertices = toDraw.ToArray();
+                    // Collect bounds across selected polylines to compute fit-to-view transform
+                    float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+                    foreach (var pl in toDraw)
+                    {
+                        if (pl.Vertices is System.Collections.IEnumerable verts)
+                        {
+                            foreach (var vObj in verts)
+                            {
+                                // Expect VertexModel with X and Y
+                                try
+                                {
+                                    var vxProp = vObj.GetType().GetProperty("X");
+                                    var vyProp = vObj.GetType().GetProperty("Y");
+                                    if (vxProp == null || vyProp == null) continue;
+                                    var xv = Convert.ToDouble(vxProp.GetValue(vObj));
+                                    var yv = Convert.ToDouble(vyProp.GetValue(vObj));
+                                    minX = Math.Min(minX, (float)xv);
+                                    minY = Math.Min(minY, (float)yv);
+                                    maxX = Math.Max(maxX, (float)xv);
+                                    maxY = Math.Max(maxY, (float)yv);
+                                }
+                                catch
+                                {
+                                    // ignore malformed vertex
+                                }
+                            }
+                        }
+                    }
+
+                    if (minX == float.MaxValue || minY == float.MaxValue)
+                        return;
+
+                    // Compute scale and offsets to fit polylines into dirtyRect with padding
+                    float padding = Math.Min(dirtyRect.Width, dirtyRect.Height) * 0.05f;
+                    float contentWidth = Math.Max(1e-6f, maxX - minX);
+                    float contentHeight = Math.Max(1e-6f, maxY - minY);
+
+                    float scaleX = (dirtyRect.Width - 2 * padding) / contentWidth;
+                    float scaleY = (dirtyRect.Height - 2 * padding) / contentHeight;
+                    float scale = Math.Min(scaleX, scaleY);
+
+                    // Centering offsets
+                    float totalWidth = contentWidth * scale;
+                    float totalHeight = contentHeight * scale;
+                    float offsetX = dirtyRect.X + (dirtyRect.Width - totalWidth) / 2f - minX * scale;
+                    // flip Y (DXF coordinate Y up -> canvas Y down), so we map maxY to top + padding
+                    float offsetY = dirtyRect.Y + (dirtyRect.Height - totalHeight) / 2f + maxY * scale;
+
+                    // Draw each polyline
+                    foreach (var pline in toDraw)
+                    {
+                        // prepare path
+                        var path = new PathF();
+                        int vertexCount = 0;
+
+                        if (pline.Vertices is System.Collections.IEnumerable verts)
+                        {
+                            bool first = true;
+                            float? startX = null, startY = null;
+                            foreach (var vObj in verts)
+                            {
+                                var vxProp = vObj.GetType().GetProperty("X");
+                                var vyProp = vObj.GetType().GetProperty("Y");
+                                if (vxProp == null || vyProp == null) continue;
+                                var xv = Convert.ToDouble(vxProp.GetValue(vObj));
+                                var yv = Convert.ToDouble(vyProp.GetValue(vObj));
+
+                                // map to canvas coords
+                                float cx = (float)xv * scale + offsetX;
+                                float cy = offsetY - (float)yv * scale; // flipped
+
+                                if (first)
+                                {
+                                    path.MoveTo(cx, cy);
+                                    startX = cx; startY = cy;
+                                    first = false;
+                                }
+                                else
+                                {
+                                    path.LineTo(cx, cy);
+                                }
+
+                                vertexCount++;
+                            }
+
+                            // if closed, connect last to first
+                            if (pline.IsClosed && startX.HasValue && startY.HasValue)
+                            {
+                                path.Close();
+                            }
+                        }
+
+                        // Determine stroke and fill colors
+                        var baseColor = ConvertToColor(pline.LayerColour) ?? Colors.Black;
+                        var fillColor = baseColor;
+                        var strokeColor = baseColor;
+                        float strokeSize = 1f;
+
+                        // If this is the selected layer, highlight the outline
+                        if (!string.IsNullOrEmpty(SelectedLayer) && string.Equals(pline.Layer ?? string.Empty, SelectedLayer, StringComparison.Ordinal))
+                        {
+                            strokeSize = 3f;
+                            strokeColor = Colors.Red;
+                        }
+
+                        canvas.SaveState();
+
+                        // Fill closed shapes (need >= 3 vertices)
+                        if (pline.IsClosed && vertexCount >= 3)
+                        {
+                            canvas.FillColor = fillColor;
+                            canvas.FillPath(path);
+                        }
+
+                        // Draw outline
+                        canvas.StrokeColor = strokeColor;
+                        canvas.StrokeSize = strokeSize;
+                        canvas.DrawPath(path);
+
+                        canvas.RestoreState();
+                    }
+                }
+
+                private Color? ConvertToColor(object? layerColour)
+                {
+                    if (layerColour == null) return null;
+
+                    // If it's a LayerColorObject
+                    if (layerColour is LayerColorObject lco)
+                    {
+                        return Color.FromRgba(
+                            ClampByte(lco.R),
+                            ClampByte(lco.G),
+                            ClampByte(lco.B),
+                            ClampByte(lco.A));
+                    }
+
+                    // If it's already a Microsoft.Maui.Graphics.Color
+                    if (layerColour is Color c) return c;
+
+                    // Try reflection (properties R,G,B,A)
+                    try
+                    {
+                        var type = layerColour.GetType();
+                        var pr = type.GetProperty("R");
+                        var pg = type.GetProperty("G");
+                        var pb = type.GetProperty("B");
+                        var pa = type.GetProperty("A");
+                        if (pr != null && pg != null && pb != null)
+                        {
+                            int r = Convert.ToInt32(pr.GetValue(layerColour));
+                            int g = Convert.ToInt32(pg.GetValue(layerColour));
+                            int b = Convert.ToInt32(pb.GetValue(layerColour));
+                            int a = pa != null ? Convert.ToInt32(pa.GetValue(layerColour)) : 255;
+                            return Color.FromRgba(ClampByte(r), ClampByte(g), ClampByte(b), ClampByte(a));
+                        }
+                    }
+                    catch
+                    {
+                        // ignore and fallback below
+                    }
+
+                    return null;
+                }
+
+                private int ClampByte(int v) => Math.Clamp(v, 0, 255);
+            }
+            // Minimal LayerColorObject shape expected by your MainPage code
+            public class LayerColorObject
+            {
+                public int R { get; set; }
+                public int G { get; set; }
+                public int B { get; set; }
+                public int A { get; set; } = 255;
             }
         }
-
-        private void AddArcToPath(PathF path, VertexModel start, VertexModel end)
-        {
-            var p1 = new PointF((float)start.X, (float)start.Y);
-            var p2 = new PointF((float)end.X, (float)end.Y);
-
-            var midPoint = new PointF((p1.X + p2.X) / 2, (p1.Y + p2.Y) / 2);
-            var perpendicular = new PointF(-(p2.Y - p1.Y), p2.X - p1.X);
-            var dist = (float)Math.Sqrt(perpendicular.X * perpendicular.X + perpendicular.Y * perpendicular.Y);
-
-            if (dist == 0) return;
-
-            perpendicular.X /= dist;
-            perpendicular.Y /= dist;
-
-            var vectorLength = (float)Math.Sqrt(Math.Pow(p2.X - p1.X, 2) + Math.Pow(p2.Y - p1.Y, 2));
-            var bulgeDist = (float)(vectorLength * start.Bulge / 2);
-            var controlPoint = new PointF(midPoint.X + perpendicular.X * bulgeDist, midPoint.Y + perpendicular.Y * bulgeDist);
-
-            path.QuadTo(controlPoint, p2);
-        }
-    }
-}

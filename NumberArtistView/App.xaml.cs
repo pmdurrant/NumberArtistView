@@ -7,24 +7,24 @@ namespace NumberArtistView
         public App()
         {
             InitializeComponent();
-
-            MainPage = new LoginPage();
         }
 
-        protected override Window CreateWindow(IActivationState activationState)
+        protected override Window CreateWindow(IActivationState? activationState)
         {
-            var window = base.CreateWindow(activationState);
+            var window = new Window(new LoginPage());
 
             window.Created += (s, e) =>
             {
 #if WINDOWS
-                var nativeWindow = window.Handler.PlatformView as MauiWinUIWindow;
-                var appWindow = nativeWindow.AppWindow;
-                if (appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+                if (window.Handler?.PlatformView is MauiWinUIWindow nativeWindow)
                 {
-                    presenter.IsMaximizable = false;
-                    presenter.IsMinimizable = false;
-                    presenter.IsResizable = false;
+                    var appWindow = nativeWindow.AppWindow;
+                    if (appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+                    {
+                        presenter.IsMaximizable = true;
+                        presenter.IsMinimizable = true;
+                        presenter.IsResizable = true;
+                    }
                 }
 #endif
             };

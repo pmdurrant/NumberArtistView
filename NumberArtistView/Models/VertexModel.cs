@@ -1,22 +1,26 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Core.Business.Objects
+﻿namespace NumberArtistView.Models
 {
     public class VertexModel
     {
-        public double X { get; set; }
-        public double Y { get; set; }
-        public double Bulge { get; set; }
-    }
+        /// <summary>
+        /// Unique identifier for the vertex.
+        /// </summary>
+        public System.Guid Id { get; set; } = System.Guid.NewGuid();
 
-    public class Pline2DModel
-    {
-        public List<VertexModel> Vertices { get; set; } = new List<VertexModel>();
-        public bool IsClosed { get; set; }
-        public string Layer { get; set; }
+        /// <summary>
+        /// X coordinate.
+        /// </summary>
+        public double X { get; set; }
+
+        /// <summary>
+        /// Y coordinate.
+        /// </summary>
+        public double Y { get; set; }
+
+        /// <summary>
+        /// Bulge value for arc representation.
+        /// </summary>
+        public double Bulge { get; set; }
+
     }
 }

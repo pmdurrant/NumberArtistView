@@ -1,39 +1,181 @@
 ﻿using Core.Business.Objects;
+using Core.Business.Objects.Models;
+using SQLite;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Net.Http.Json;
-using System.Text;
-using System.Threading.Tasks;
-using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+
 
 namespace NumberArtistView.Services
 {
     public class ResourceAccess
     {
         private readonly HttpClient _httpClient;
-    
+        private SQLiteAsyncConnection _database;
+
+        // Cache JsonSerializerOptions instance for reuse (CA1869 fix)
+        private static readonly System.Text.Json.JsonSerializerOptions CachedJsonOptions =
+            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
         public ResourceAccess()
         {
+
+            var dbPath = Path.Combine(FileSystem.AppDataDirectory, "NumberArtist.db3");
+            Debug.WriteLine($"DatabaseService: DB path = {dbPath}");
+
+            _database = new SQLiteAsyncConnection(dbPath);
+
+            // Use ApiConfiguration to get the correct URL (handles localhost vs production)
+            var apiUrl = ApiConfiguration.GetApiUrl();
+            Debug.WriteLine($"ResourceAccess: Using API URL: {apiUrl}");
+            
+#if DEBUG
+            var handler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+                {
+                    Debug.WriteLine($"SSL Certificate validation in ResourceAccess: {errors}");
+                    return true; // Accept all certificates in debug mode
+                }
+            };
+            
+            _httpClient = new HttpClient(handler)
+            {
+                BaseAddress = new Uri(apiUrl.EndsWith('/') ? apiUrl : apiUrl + "/"),
+                Timeout = TimeSpan.FromSeconds(30)
+            };
+#else
             _httpClient = new HttpClient
             {
-                BaseAddress = new Uri("https://numberartist.officeblox.co.uk:5015/")
+                BaseAddress = new Uri(apiUrl.EndsWith('/') ? apiUrl : apiUrl + "/"),
+                Timeout = TimeSpan.FromSeconds(30)
             };
+#endif
+
+            // When using IP address, set the Host header for proper routing
+            if (ApiConfiguration.UseFallbackIP || ApiConfiguration.UseLocalhost)
+            {
+                _httpClient.DefaultRequestHeaders.Host = ApiConfiguration.GetHostname() + ":5015";
+                Debug.WriteLine($"ResourceAccess - Set Host header to: {_httpClient.DefaultRequestHeaders.Host}");
+            }
 
             var token = Preferences.Get("auth_token", string.Empty);
             if (!string.IsNullOrEmpty(token))
             {
                 _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                Debug.WriteLine("ResourceAccess: Auth token set");
+            }
+            else
+            {
+                Debug.WriteLine("ResourceAccess: No auth token found");
             }
         }
 
-        public async Task<string> GetResourceAsync(string resourceName)
+        //
+        public async Task<byte[]?> GetResourceAsync(string resourceName)
+        {
+            if (string.IsNullOrWhiteSpace(resourceName))
+            {
+                Debug.WriteLine("GetResourceAsync: resourceName is null or empty");
+                return null;
+            }
+
+            // Sanitize filename to avoid path traversal
+            var safeName = Path.GetFileName(resourceName);
+            Debug.WriteLine($"GetResourceAsync: Requesting resource '{safeName}'");
+
+            var targetDirectory = Path.Combine(FileSystem.Current.AppDataDirectory, "dxf_files");
+            Directory.CreateDirectory(targetDirectory);
+
+            var targetFile = Path.Combine(targetDirectory, safeName);
+
+            // If cached on disk, return bytes directly
+            if (File.Exists(targetFile))
+            {
+                try
+                {
+                    Debug.WriteLine($"GetResourceAsync: Found cached file at {targetFile}");
+                    return await File.ReadAllBytesAsync(targetFile);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error reading cached resource file: {ex.Message}");
+                    // fall through to re-fetch from server
+                }
+            }
+
+            try
+            {
+                // Request headers-first so we can stream the body
+                var requestUri = $"api/dxffiles/GetResource?resourceName={Uri.EscapeDataString(safeName)}";
+                Debug.WriteLine($"GetResourceAsync: Fetching from {_httpClient.BaseAddress}{requestUri}");
+                
+                using var response = await _httpClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead);
+                
+                Debug.WriteLine($"GetResourceAsync: Response status: {response.StatusCode}");
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"GetResourceAsync: Error response: {errorContent}");
+                }
+                
+                response.EnsureSuccessStatusCode();
+
+                // Stream response to disk to avoid large in-memory buffers
+                await using (var responseStream = await response.Content.ReadAsStreamAsync())
+                {
+                    // Write to a temp file first then move to final path to avoid partial files on failures
+                    var tempFile = targetFile + ".tmp";
+                    await using (var fs = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                    {
+                        await responseStream.CopyToAsync(fs);
+                        await fs.FlushAsync();
+                    }
+
+                    // Atomically replace final file
+                    if (File.Exists(targetFile))
+                        File.Delete(targetFile);
+                    File.Move(tempFile, targetFile);
+                }
+
+                Debug.WriteLine($"GetResourceAsync: Successfully saved to {targetFile}");
+                // Return the bytes we just saved
+                return await File.ReadAllBytesAsync(targetFile);
+            }
+            catch (HttpRequestException ex)
+            {
+                Debug.WriteLine($"GetResourceAsync: HTTP Request Exception: {ex.Message}");
+                Debug.WriteLine($"GetResourceAsync: Inner Exception: {ex.InnerException?.Message}");
+                return null;
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"GetResourceAsync: Request timed out: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"GetResourceAsync: Unexpected error: {ex.Message}");
+                Debug.WriteLine($"GetResourceAsync: Stack trace: {ex.StackTrace}");
+                return null;
+            }
+        }
+
+
+        public async Task<string> GetBackGroundResourceBynameAsync(string resourceName)
         {
             // 1. Define the target directory and file path within the app's data folder.
-            var targetDirectory = Path.Combine(FileSystem.Current.AppDataDirectory, "dxf_files");
+            var targetDirectory = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files");
             var targetFile = Path.Combine(targetDirectory, resourceName);
 
             // 2. If the file already exists, return its content.
@@ -48,10 +190,10 @@ namespace NumberArtistView.Services
                 Directory.CreateDirectory(targetDirectory);
 
                 // 4. Make the API call to get the resource.
-                var response = await _httpClient.GetAsync($"api/dxffiles/GetResource?resourceName={resourceName}");
+                var response = await _httpClient.GetAsync($"api/dxffiles/GetBackGroundResource?resourceName={resourceName}");
                 response.EnsureSuccessStatusCode(); // Throws an exception for non-2xx responses.
-
-                // 5. Read the content and save it to the file.
+                                                    //check api callhkjhkjhkjh
+                                                    // 5. Read the content and save it to the file.
                 var content = await response.Content.ReadAsStringAsync();
                 await File.WriteAllTextAsync(targetFile, content);
 
@@ -69,6 +211,495 @@ namespace NumberArtistView.Services
             {
                 // Handle other potential errors (e.g., file system access).
                 Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                return null;
+            }
+        }
+
+
+        public async Task<string?> GetBackgroundResourceAsync(long ReferencefileId)
+        {
+            if (ReferencefileId <= 0)
+                return null;
+
+            var targetDirectory = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files");
+            //           if (!Directory.Exists(targetDirectory))
+            //{
+            //               Directory.CreateDirectory(targetDirectory);
+            //           }
+
+            // Try to get the reference drawing from local DB
+            ReferenceDrawing dxfReferenceEntry = null;
+            try
+            {
+
+                if (ReferencefileId <= int.MaxValue)
+                {
+                    dxfReferenceEntry = await _database.FindAsync<ReferenceDrawing>((int)ReferencefileId);
+                }
+                //dxfReferenceEntry = await _database.Table<ReferenceDrawing>()
+                //                 .Where(f => f.Id == (int)ReferencefileId)
+                //                 .FirstOrDefaultAsync();
+            }
+            catch (Exception ex)
+            {
+
+                string error = ex.Message;
+                dxfReferenceEntry = null;
+            }
+            if (dxfReferenceEntry == null)
+            {  //get from server}
+
+
+                try
+                {
+
+                    //?resourceName={Uri.EscapeDataString(filename)}
+
+
+                    var response = await _httpClient.GetAsync($"api/Dxffiles/GetDxfReferenceDrawingByReferenceId/{ReferencefileId}");
+
+
+
+                    response.EnsureSuccessStatusCode();
+
+
+                    var content = await response.Content.ReadAsStringAsync();
+                    var refdrawing = Newtonsoft.Json.JsonConvert.DeserializeObject<ReferenceDrawing>(content);
+
+                    // Deserialize into ReferenceDrawing (case-insensitive)
+                    // Use cached JsonSerializerOptions instance
+
+                    var bytes = await response.Content.ReadAsByteArrayAsync();
+                    var obj = JsonSerializer.Deserialize<ReferenceDrawing>(bytes, CachedJsonOptions);
+                    dxfReferenceEntry = System.Text.Json.JsonSerializer.Deserialize<ReferenceDrawing>(content, CachedJsonOptions);
+
+                    if (dxfReferenceEntry != null)
+                    {
+                        // Cache the result in the local database
+
+                        await _database.InsertOrReplaceAsync(dxfReferenceEntry);
+
+
+
+                        var responseBackground = await _httpClient.GetAsync($"api/Dxffiles/GetReferenceImage/{ReferencefileId}");
+
+                        //var dfd = await responseBackground.Content.ReadAsByteArrayAsync();
+                        //MemoryStream ms = new MemoryStream(dfd);
+
+                        //File.WriteAllBytes(filepath);
+                        //responseBackground.EnsureSuccessStatusCode();
+                        var contentBackground = await responseBackground.Content.ReadAsByteArrayAsync();
+                        string gjhj = "stop and check";
+
+                        // Fetch the DXF resource content and write to ref_files
+                        //error looping   var resourceContent = await GetBackgroundResourceAsync(dxfReferenceEntry.Id);
+                        Console.WriteLine("dxfReferenceEntry.Name" + dxfReferenceEntry.Name);
+                        // Console.WriteLine("resourceContent" + resourceContent);
+                        if (contentBackground != null)
+                        {
+                            var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", dxfReferenceEntry.Name.ToString());
+                            Directory.CreateDirectory(refDir);
+                            var targetFileRef = Path.Combine(refDir, dxfReferenceEntry.Name);
+                            await File.WriteAllBytesAsync(targetFileRef, contentBackground ?? Array.Empty<byte>());
+                            return "done";
+                        }
+                    }
+                }
+                catch (HttpRequestException ex)
+                {
+                    Console.WriteLine($"Error fetching reference drawing: {ex.Message}");
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                    return null;
+                }
+                return null;
+            }
+
+            else
+            {
+
+                var filename = dxfReferenceEntry.Name;
+                var storedFileName = dxfReferenceEntry.StoredFileName;
+
+                var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", dxfReferenceEntry.Name.ToString());
+
+                var refDir_filename = Path.Combine(refDir, dxfReferenceEntry.StoredFileName);
+
+                if (File.Exists(refDir_filename))
+                {
+                    return await File.ReadAllTextAsync(refDir_filename);
+                }
+                else
+                {
+                    try
+                    {
+                        var response = await _httpClient.GetAsync($"api/dxffiles/GetBackGroundResource?resourceName={Uri.EscapeDataString(filename)}");
+                        response.EnsureSuccessStatusCode();
+                        var content = await response.Content.ReadAsStringAsync();
+                        await File.WriteAllTextAsync(refDir_filename, content);
+
+                        writeconenttolocalpath(dxfReferenceEntry, content);
+
+
+
+
+
+
+
+
+
+                        return content;
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        Console.WriteLine($"Error fetching resource: {ex.Message}");
+                        return null;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                        return null;
+                    }
+                }
+
+            }
+
+
+
+            // Helper to write fetched DXF content into ref_files/<DxfFileId>/<Name>
+            async Task<string?> WriteRefFileAsync(ReferenceDrawing rd, string fileContent)
+            {
+                if (rd == null || string.IsNullOrEmpty(rd.Name))
+                    return null;
+
+                var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", rd.DxfFileId.ToString());
+                Directory.CreateDirectory(refDir);
+                var targetFileRef = Path.Combine(refDir, rd.Name);
+                await File.WriteAllTextAsync(targetFileRef, fileContent ?? string.Empty);
+
+                return targetFileRef;
+            }
+
+            if (dxfReferenceEntry != null)
+            {
+                // Fetch the DXF resource and write to ref_files
+                var fileBytes = await GetResourceAsync(dxfReferenceEntry.Name);
+
+
+                if (fileBytes != null && fileBytes.Length > 0)
+                {
+                    // Convert byte[] to string (assuming text content, e.g., DXF file is text)
+                    var fileContent = Encoding.UTF8.GetString(fileBytes);
+                    await WriteRefFileAsync(dxfReferenceEntry, fileContent);
+                }
+
+                var resourceName = dxfReferenceEntry.Name;
+                var targetFile = Path.Combine(targetDirectory, resourceName);
+
+                if (File.Exists(targetFile))
+                    return await File.ReadAllTextAsync(targetFile);
+
+                try
+                {
+                    var response = await _httpClient.GetAsync($"api/dxffiles/GetBackGroundResourceBynameAsync?resourceName={Uri.EscapeDataString(resourceName)}");
+                    response.EnsureSuccessStatusCode();
+
+                    var content = await response.Content.ReadAsStringAsync();
+                    await File.WriteAllTextAsync(targetFile, content);
+                    return content;
+                }
+                catch (HttpRequestException ex)
+                {
+                    Console.WriteLine($"Error fetching resource: {ex.Message}");
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                    return null;
+                }
+            }
+            else
+            {
+                // Not found locally — consult server / other DB methods
+                DatabaseService dbs = new DatabaseService();
+                var dxffile = await dbs.GetDxfFileByReferenceDrawingIdAsync(ReferencefileId);
+                if (dxffile == null)
+                    return null;
+
+                try
+                {
+                    var response = await _httpClient.GetAsync($"api/Dxffiles/GetDxfReferenceDrawingByReferenceId/{ReferencefileId}");
+                    response.EnsureSuccessStatusCode();
+
+                    var content = await response.Content.ReadAsStringAsync();
+
+                    // Deserialize into ReferenceDrawing (case-insensitive)
+                    // Use cached JsonSerializerOptions instance
+                    var referenceDrawing = System.Text.Json.JsonSerializer.Deserialize<ReferenceDrawing>(
+                        content,
+                        CachedJsonOptions);
+
+                    if (referenceDrawing == null)
+                        return null;
+
+                    // Fetch the DXF resource content and write to ref_files
+
+
+                    var resourceContent = await GetBackgroundResourceAsync(referenceDrawing.Id);
+                    if (!string.IsNullOrEmpty(resourceContent))
+                    {
+                        await WriteRefFileAsync(referenceDrawing, resourceContent);
+                    }
+
+                    // Insert into local DB (avoid duplicate key exceptions)
+                    try
+                    {
+                        await _database.InsertAsync(referenceDrawing);
+                    }
+                    catch
+                    {
+                        // If insert fails (e.g., already exists), ignore.
+                    }
+
+                    // Ensure background file is stored locally and return it
+                    var targetFile = Path.Combine(targetDirectory, referenceDrawing.Name);
+                    if (File.Exists(targetFile))
+                        return await File.ReadAllTextAsync(targetFile);
+
+                    try
+                    {
+                        var bgResponse = await _httpClient.GetAsync($"api/dxffiles/GetBackGroundResource?resourceName={Uri.EscapeDataString(referenceDrawing.Name)}");
+                        bgResponse.EnsureSuccessStatusCode();
+
+                        var bgContent = await bgResponse.Content.ReadAsStringAsync();
+                        await File.WriteAllTextAsync(targetFile, bgContent);
+                        return bgContent;
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        Console.WriteLine($"Error fetching background resource: {ex.Message}");
+                        return null;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                        return null;
+                    }
+                }
+                catch (HttpRequestException ex)
+                {
+                    Console.WriteLine($"Error fetching reference drawing: {ex.Message}");
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                    return null;
+                }
+            }
+        }
+
+        public async Task<string> GetBackgroundResourceAsync(string resourceName)
+
+        {
+            var response = await _httpClient.GetAsync($"api/dxffiles/GetBackGroundResource?resourceName={Uri.EscapeDataString(resourceName)}");
+            if (response.IsSuccessStatusCode)
+            {
+                return await response.Content.ReadAsStringAsync();
+            }
+            return null;
+        }
+        private void writeconenttolocalpath(ReferenceDrawing dxfReferenceEntry, string content)
+        {
+
+            var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", dxfReferenceEntry.StoredFileName);
+            Directory.CreateDirectory(refDir);
+            var targetFileRef = Path.Combine(refDir, dxfReferenceEntry.StoredFileName);
+            File.WriteAllText(targetFileRef, content ?? string.Empty);
+        }
+
+        // Diagnostic helper: call this from a debug path to inspect the DB and try alternative lookup.
+        public async Task DiagnoseReferenceDrawingLookupAsync(long referenceFileId)
+        {
+            Debug.WriteLine($"Diagnose: referenceFileId (long) = {referenceFileId}");
+            if (referenceFileId <= int.MaxValue)
+                Debug.WriteLine($"Diagnose: cast to int = {(int)referenceFileId}");
+            else
+                Debug.WriteLine("Diagnose: referenceFileId larger than int.MaxValue");
+
+            // DB path info
+            try
+            {
+                var dbPath = Path.Combine(FileSystem.AppDataDirectory, "NumberArtist.db3");
+                Debug.WriteLine($"Diagnose: DB path = {dbPath}");
+                Debug.WriteLine($"Diagnose: DB file exists = {File.Exists(dbPath)}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Diagnose: error reading DB path: {ex.Message}");
+            }
+
+            // Ensure table exists (won't delete data; CreateTableAsync is safe)
+            try
+            {
+                await _database.CreateTableAsync<ReferenceDrawing>();
+                var total = await _database.Table<ReferenceDrawing>().CountAsync();
+                Debug.WriteLine($"Diagnose: ReferenceDrawing table row count = {total}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Diagnose: error ensuring table / counting rows: {ex.Message}");
+            }
+
+            //// Try FindAsync
+            //try
+            //{
+            //    if (referenceFileId <= int.MaxValue)
+            //    {
+            //        var byFind = await _database.FindAsync<ReferenceDrawing>((int)referenceFileId);
+            //        Debug.WriteLine(byFind == null ? "Diagnose: FindAsync returned null" : $"Diagnose: FindAsync found Id={byFind.Id} Name={byFind.Name}");
+            //    }
+            //}
+            //catch (Exception ex)
+            //{
+            //    Debug.WriteLine($"Diagnose: FindAsync threw: {ex.Message}");
+            //}
+
+            // Try explicit query
+            try
+            {
+                var byQuery = await _database.Table<ReferenceDrawing>().Where(r => r.Id == (long)referenceFileId).FirstOrDefaultAsync();
+                Debug.WriteLine(byQuery == null ? "Diagnose: Table.Where returned null" : $"Diagnose: Table.Where found Id={byQuery.Id} Name={byQuery.Name}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Diagnose: Table.Where threw: {ex.Message}");
+            }
+
+            // Dump a few sample rows to inspect id values (first 10)
+            try
+            {
+                var sample = await _database.Table<ReferenceDrawing>().Take(10).ToListAsync();
+                Debug.WriteLine($"Diagnose: sample count = {sample.Count}");
+                foreach (var r in sample)
+                    Debug.WriteLine($"Diagnose: row Id={r.Id} Name={r.Name} StoredFileName={r.StoredFileName}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Diagnose: sample dump threw: {ex.Message}");
+            }
+        }
+    
+    // Add this helper method to ResourceAccess to return the raw image bytes for a reference drawing.
+// Place it anywhere inside the ResourceAccess class (e.g. near other GetBackground* methods).
+public async Task<byte[]?> GetReferenceImageBytesAsync(long referenceFileId)
+        {
+            if (referenceFileId <= 0)
+            {
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Invalid referenceFileId: {referenceFileId}");
+                return null;
+            }
+
+            Debug.WriteLine($"GetReferenceImageBytesAsync: Requesting image for referenceFileId={referenceFileId}");
+
+            try
+            {
+                // Try to resolve a local cached file path if ReferenceDrawing exists in the DB
+                ReferenceDrawing? dxfReferenceEntry = null;
+                try
+                {
+                    if (referenceFileId <= int.MaxValue)
+                        dxfReferenceEntry = await _database.FindAsync<ReferenceDrawing>((int)referenceFileId);
+                    
+                    if (dxfReferenceEntry != null)
+                        Debug.WriteLine($"GetReferenceImageBytesAsync: Found in DB - Name={dxfReferenceEntry.Name}");
+                }
+                catch (Exception dbEx)
+                {
+                    Debug.WriteLine($"GetReferenceImageBytesAsync: DB lookup error: {dbEx.Message}");
+                    dxfReferenceEntry = null;
+                }
+
+                string? targetFile = null;
+                if (dxfReferenceEntry != null)
+                {
+                    var refDir = Path.Combine(FileSystem.Current.AppDataDirectory, "ref_files", dxfReferenceEntry.Name ?? referenceFileId.ToString());
+                    Directory.CreateDirectory(refDir);
+                    // Use StoredFileName if available otherwise fall back to Name
+                    var fileName = !string.IsNullOrEmpty(dxfReferenceEntry.StoredFileName) ? dxfReferenceEntry.StoredFileName : dxfReferenceEntry.Name;
+                    targetFile = Path.Combine(refDir, fileName ?? referenceFileId.ToString());
+
+                    if (File.Exists(targetFile))
+                    {
+                        try
+                        {
+                            Debug.WriteLine($"GetReferenceImageBytesAsync: Found cached image at {targetFile}");
+                            return await File.ReadAllBytesAsync(targetFile);
+                        }
+                        catch (Exception fileEx)
+                        {
+                            Debug.WriteLine($"GetReferenceImageBytesAsync: Error reading cached file: {fileEx.Message}");
+                            // if reading fails, fall through to re-download
+                        }
+                    }
+                }
+
+                // Fetch from server endpoint that returns image bytes
+                var requestUri = $"api/Dxffiles/GetReferenceImage/{referenceFileId}";
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Fetching from {_httpClient.BaseAddress}{requestUri}");
+                
+                var response = await _httpClient.GetAsync(requestUri);
+                
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Response status: {response.StatusCode}");
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"GetReferenceImageBytesAsync: Error response: {errorContent}");
+                }
+                
+                response.EnsureSuccessStatusCode();
+
+                var contentBytes = await response.Content.ReadAsByteArrayAsync();
+                Debug.WriteLine($"GetReferenceImageBytesAsync: Received {contentBytes?.Length ?? 0} bytes");
+                
+                if (contentBytes != null && contentBytes.Length > 0)
+                {
+                    // If we have a target path, write it for caching
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(targetFile))
+                        {
+                            // Ensure directory exists
+                            var directory = Path.GetDirectoryName(targetFile);
+                            if (!string.IsNullOrEmpty(directory))
+                                Directory.CreateDirectory(directory);
+
+                            await File.WriteAllBytesAsync(targetFile, contentBytes);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore cache write errors
+                    }
+
+                    return contentBytes;
+                }
+
+                return null;
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"Error fetching reference image: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Unexpected error fetching reference image: {ex.Message}");
                 return null;
             }
         }

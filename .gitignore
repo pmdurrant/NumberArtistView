@@ -8,3 +8,8 @@
 /NumberArtist.Api/obj
 /NumberArtistView/bin/Debug
 /NumberArtistView/obj
+
+.fake
+/Core.Business.Objects/bin/Debug/net9.0/Core.Business.Objects.dll
+/Core.Business.Objects/bin/Debug/net9.0/Core.Business.Objects.pdb
+/NumberArtist.Api/https/_.officeblox.co.uk.pfx

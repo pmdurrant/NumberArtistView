@@ -3,14 +3,36 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewModels="clr-namespace:NumberArtist.View.ViewModels"
              x:Class="NumberArtist.View.Views.LoginPage"
+        x:DataType="viewModels:LoginViewModel"
              Title="Login">
     <ContentPage.BindingContext>
         <viewModels:LoginViewModel />
     </ContentPage.BindingContext>
     <VerticalStackLayout Spacing="10" Padding="20" VerticalOptions="Center">
         <Label Text="Welcome" FontSize="Header" HorizontalOptions="Center" />
+        <Label Text="Api Ip Address"></Label>
+        <Entry Placeholder="Api Ip Address" Text="{Binding IpAddress}" />
         <Entry Placeholder="Username" Text="{Binding Username}" />
-        <Entry Placeholder="Password" IsPassword="True" Text="{Binding Password}" />
+
+        <!-- Password entry with view icon -->
+        <Grid ColumnDefinitions="*,Auto" VerticalOptions="Center">
+            <Entry x:Name="PasswordEntry"
+                   Placeholder="Password"
+                   IsPassword="True"
+                   Text="{Binding Password}"
+                   VerticalOptions="Center"
+                   Margin="0" />
+            <!-- Simple eye icon button; add Clicked handler in code-behind to toggle PasswordEntry.IsPassword if desired -->
+            <Button Grid.Column="1"
+                    Text="👁"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    Padding="6"
+                    BackgroundColor="Transparent"
+                    VerticalOptions="Center"
+                    HorizontalOptions="End" Clicked="OnTogglePasswordVisibilityClicked" />
+        </Grid>
+
         <Button Text="Login" Command="{Binding LoginCommand}" HorizontalOptions="Center" />
     </VerticalStackLayout>
 </ContentPage>

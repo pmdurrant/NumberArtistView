@@ -1,24 +1,191 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!--
+PSEUDOCODE / PLAN (detailed):
+
+1. Problem:
+   - The overlay GraphicsView and the background Image are not rendered at the same visual scale when the page/layout changes.
+
+2. Goal:
+   - Ensure the GraphicsView has the same rendered size as the BackgroundImage so drawn content aligns with the image pixels/scale.
+
+3. Strategy:
+   - Use the Image with Aspect="AspectFit" so it scales uniformly without cropping.
+   - Center the Image in its cell (HorizontalOptions/VerticalOptions = Center) so AspectFit size is predictable.
+   - Bind the GraphicsView WidthRequest and HeightRequest to the Image's actual Width and Height using x:Reference:
+       WidthRequest="{Binding Source={x:Reference BackgroundImageView}, Path=Width}"
+       HeightRequest="{Binding Source={x:Reference BackgroundImageView}, Path=Height}"
+   - Center the GraphicsView as well (HorizontalOptions/VerticalOptions = Center) so it overlays exactly on the image.
+   - Keep InputTransparent on the Image so gestures hit the GraphicsView.
+   - Keep existing gesture recognizers on the GraphicsView.
+
+4. Result:
+   - Both controls will render at identical size and be aligned, so drawing coordinates in GraphicsView match the image scale.
+
+END PSEUDOCODE
+-->
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="NumberArtistView.MainPage"
              xmlns:drawable="clr-namespace:NumberArtistView"
-             Title="Number Artist">
-    <Grid RowDefinitions="Auto, Auto, *, Auto" ColumnDefinitions="*, Auto">
+             x:Name="Root"
+             xmlns:models="clr-namespace:NumberArtistView"
+            
+             Title="Number Artist"
+             BindingContext="{x:Reference Root}">
 
-        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0"
-                SelectedIndexChanged="DxfFilePicker_SelectedIndexChanged"/>
+    <Grid RowDefinitions="Auto, *, Auto" ColumnDefinitions="*, Auto, 250">
 
-        <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="1" />
+        <!-- Row 0: File Selection -->
+        <Picker x:Name="DxfFilePicker" Title="Select a DXF file" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" 
+                SelectedIndexChanged="DxfFilePicker_SelectedIndexChanged"  />
 
-        <ListView x:Name="LayersListView" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" />
+        <Button x:Name="SelectDxfButton" Text="Select DXF File" Clicked="SelectDxfButton_Clicked" Grid.Row="0" Grid.Column="2" />
 
-        <GraphicsView x:Name="GraphicsView" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" />
 
-        <ProgressBar x:Name="LoadingProgressBar" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
+        <!-- Row 1: Main Content -->
+        <!-- Use a Grid with an Image as background and bind Image.Source to the page property via BindingContext -->
+        <Grid Grid.Row="1" Grid.Column="0" HorizontalOptions="Fill" VerticalOptions="Fill">
+            <!-- Use AspectFit so the image scales uniformly (no cropping) and remains centered.
+                 Bind GraphicsView size to this Image's actual Width/Height so the overlay matches the image scale. -->
+            <Image x:Name="BackgroundImageView"
+                   Source="{Binding BackgroundImage}"
+                   Aspect="AspectFit"
+                   Opacity="0.5"
+                   IsEnabled="True"
+                   IsVisible="True"
+                   InputTransparent="True"
+                   VerticalOptions="Center"
+                   HorizontalOptions="Center" />
 
-        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" HorizontalOptions="FillAndExpand"/>
+            <GraphicsView x:Name="GraphicsView"
+                          BackgroundColor="Transparent"
+                          VerticalOptions="Center"
+                          HorizontalOptions="Center"
+                          WidthRequest="{Binding Source={x:Reference BackgroundImageView}, Path=Width}"
+                          HeightRequest="{Binding Source={x:Reference BackgroundImageView}, Path=Height}"
+                          >
+                <GraphicsView.GestureRecognizers>
+                    <PinchGestureRecognizer PinchUpdated="PinchGestureRecognizer_PinchUpdated" />
+                    <PanGestureRecognizer PanUpdated="PanGestureRecognizer_PanUpdated" />
+                </GraphicsView.GestureRecognizers>
+            </GraphicsView>
+        </Grid>
+
+        <ProgressBar x:Name="LoadingProgressBar" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" VerticalOptions="Center" />
+
+        <!-- Replace GridSplitter with a simple BoxView as a visual separator -->
+        <BoxView Grid.Row="1" Grid.Column="1" WidthRequest="5" HorizontalOptions="Center" VerticalOptions="Fill" Color="Gray" />
+
+        <!-- Right column: Layers + Vertices -->
+        <Grid Grid.Row="1" Grid.Column="2" Padding="5" RowDefinitions="Auto,Auto,200,Auto,Auto,*">
+            <!-- Fixed "Layers" title -->
+            <Label Text="Layers" FontAttributes="Bold" Grid.Row="0" />
+
+            <!-- Fixed header row for Layers -->
+            <Grid Grid.Row="1" Padding="5" ColumnDefinitions="Auto,*,Auto" BackgroundColor="Transparent">
+                <CheckBox x:Name="AllLayersCheckBox"
+                          VerticalOptions="Center"
+                          CheckedChanged="AllLayersCheckBox_CheckedChanged" />
+                <Label Text="Layer" VerticalOptions="Center" Grid.Column="1" />
+                <Label Text="Color" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
+            </Grid>
+
+            <!-- Scrollable Layers ListView without header -->
+            <CollectionView x:Name="LayersListView"
+                            Grid.Row="2"
+                            SelectionMode="None"
+                            BackgroundColor="Transparent">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
+                            <!-- New checkbox bound to IsVisible -->
+                            <CheckBox IsChecked="{Binding IsVisible}" VerticalOptions="Center" Grid.Column="0" />
+
+                            <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
+
+                            <!-- Replace ColorPicker with BoxView to show color -->
+                            <BoxView Color="{Binding color}" WidthRequest="100" HeightRequest="20" VerticalOptions="Center" Grid.Column="2" >
+                                <BoxView.GestureRecognizers>
+                                    <SwipeGestureRecognizer Direction="Right"  Swiped="SwipeGestureRecognizer_Swiped">
+                                    </SwipeGestureRecognizer>
+                                </BoxView.GestureRecognizers>
+                            </BoxView>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <!-- Fixed "Groups" title -->
+            <Label Text="Groups" FontAttributes="Bold" Grid.Row="3" />
+
+            <!-- Fixed header row for Groups -->
+            <Grid Grid.Row="4" Padding="5" ColumnDefinitions="Auto,*,Auto" BackgroundColor="Transparent">
+                <Label Text="Paint  " VerticalOptions="Center" />
+                <Label Text="Layer" VerticalOptions="Center" Grid.Column="1" />
+                <Label Text="Closed Count" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
+            </Grid>
+
+            <!-- Scrollable content area with both ListViews -->
+            <ScrollView Grid.Row="5" VerticalOptions="Fill">
+                <VerticalStackLayout Spacing="10">
+                    <!-- ListView for closed polyline groups (without header) -->
+                    <CollectionView x:Name="ClosedGroupsListView"
+                                    ItemsSource="{Binding VisibleClosedGroups[0]}"
+                                    BackgroundColor="Transparent"
+                                    HeightRequest="300"
+                                    SelectionMode="Single"
+                                    SelectionChanged="ClosedGroupsListView_SelectionChanged">
+                        <CollectionView.ItemTemplate>
+                            <!-- Use runtime bindings (no x:DataType) so property names resolve at runtime -->
+                            <DataTemplate>
+                                <Grid Padding="5" ColumnDefinitions="Auto,*,Auto">
+                                    <!-- Checkbox bound to whether this closed group is painted -->
+                                    <CheckBox IsChecked="{Binding IsPainted, Mode=TwoWay}" VerticalOptions="Center" Grid.Column="0"/>
+
+                                    <!-- Layer name for the closed group -->
+                                    <Label Text="{Binding LayerName}" VerticalOptions="Center" Grid.Column="1" />
+
+                                    <!-- Number of closed polylines in the group -->
+                                    <Label Text="{Binding ClosedPlinesCount}" VerticalOptions="Center" Grid.Column="2" HorizontalTextAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+
+                    <!-- Label for selected polylines section -->
+                    <Label Text="Polylines in Selected Group" FontAttributes="Bold" Padding="5,10,5,0" />
+
+                    <!-- Header for selected polylines -->
+                    <Grid Padding="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" BackgroundColor="Transparent">
+                        <Label Text="Layer" FontAttributes="Bold" />
+                        <Label Text="Id" FontAttributes="Bold" Grid.Column="1" />
+                        <Label Text="Painted" FontAttributes="Bold" Grid.Column="2" HorizontalTextAlignment="Center" />
+                    </Grid>
+
+                    <!-- New CollectionView to show Pline2DModels of the selected closed group (without header) -->
+                    <CollectionView x:Name="SelectedPlinesListView"
+                                    BackgroundColor="Transparent"
+                                    HeightRequest="300"
+                                    SelectionMode="None" ItemsSource="">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Padding="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                    <Label Text="{Binding Layer}" />
+                                    <Label Text="{Binding Id,Mode=OneWay}" Grid.Column="1" />
+                                    <CheckBox IsChecked="{Binding IsPainted, Mode=TwoWay}" 
+                                              VerticalOptions="Center" 
+                                              CheckedChanged="PlinePainted_CheckedChanged" 
+                                              Grid.Column="2" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </ScrollView>
+        </Grid>
+
+        <!-- Row 2: Logout -->
+        <Button x:Name="LogoutButton" Text="Logout" Clicked="LogoutButton_Clicked" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" HorizontalOptions="Fill"/>
 
     </Grid>
 </ContentPage>
-

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using NumberArtist.View;
 using NumberArtist.View.ViewModels;
+using NumberArtist.View.Views;
 using NumberArtistView.Services;
 
 namespace NumberArtistView
@@ -12,7 +13,7 @@ namespace NumberArtistView
             var builder = MauiApp.CreateBuilder();
             builder
                 .UseMauiApp<App>()
-                .ConfigureFonts(fonts =>
+                 .ConfigureFonts(fonts =>
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                     fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
@@ -30,7 +31,7 @@ namespace NumberArtistView
 
             // Register Pages
             builder.Services.AddSingleton<MainPage>();
-            builder.Services.AddSingleton<NumberArtist.View.Views.LoginPage>();
+            builder.Services.AddSingleton<LoginPage>();
 
 
             return builder.Build();
