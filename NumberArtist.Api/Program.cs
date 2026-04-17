@@ -1,14 +1,16 @@
+using Core.Business.Objects;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-
+using Microsoft.OpenApi;
 using NumberArtist.Api.Data;
-using Core.Business.Objects;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using Microsoft.OpenApi;
+
+
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -32,7 +34,6 @@ catch (Exception ex)
     Console.WriteLine("SSL Certificate could not be found or is invalid. Kestrel will use default configuration.");
     Console.WriteLine(ex.Message);
 }
-
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
@@ -45,7 +46,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddIdentity<AppUser, IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
-
+builder.Services.AddOpenApi();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -58,16 +59,20 @@ builder.Services.AddSwaggerGen(c =>
     });
 
     // Define the BearerAuth scheme
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    c.AddSecurityDefinition("bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
-        Name = "Authorization",
+        Name = "JWT Authentication",
+        Description = "JWT Authorization header using the Bearer scheme.",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
+        Scheme = JwtBearerDefaults.AuthenticationScheme,
+        BearerFormat = "JWT",
     });
 
+    c.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("bearer", document)] = []
+    });
 });
 
 
@@ -94,9 +99,11 @@ builder.Services.AddAuthentication(options =>
 
 var app = builder.Build();
 
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    app.MapOpenApi();
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
@@ -109,7 +116,6 @@ else
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 
